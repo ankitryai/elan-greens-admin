@@ -9,7 +9,7 @@
 // resulting Storage URL is saved to the DB.
 // =============================================================================
 
-import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase'
+import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase.server'
 import { createSpecies } from '@/lib/queries'
 import { plantSpeciesSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'

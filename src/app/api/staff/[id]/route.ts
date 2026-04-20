@@ -1,7 +1,7 @@
 // PATCH /api/staff/[id] — updates an existing staff member.
 // If a new photoBase64 is supplied the old photo is replaced in storage.
 
-import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase'
+import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase.server'
 import { updateStaff } from '@/lib/queries'
 import { staffSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'

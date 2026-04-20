@@ -7,7 +7,7 @@
 // to Plant.id server-side, and returns only the structured result.
 // =============================================================================
 
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { PlantIdResult } from '@/types'
 

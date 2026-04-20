@@ -8,7 +8,7 @@
 // =============================================================================
 
 import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { redirect } from 'next/navigation'
 
 // Nav items — adding a new section only requires adding one entry here.

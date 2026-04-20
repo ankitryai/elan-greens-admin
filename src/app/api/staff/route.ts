@@ -1,6 +1,6 @@
 // POST /api/staff — creates a new staff member, optionally uploading a photo.
 
-import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase'
+import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase.server'
 import { createStaff } from '@/lib/queries'
 import { staffSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'

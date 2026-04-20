@@ -8,8 +8,8 @@
 // requires the service-role key. This must stay server-side.
 // =============================================================================
 
-import { createServiceRoleClient } from '@/lib/supabase'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServiceRoleClient } from '@/lib/supabase.server'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse } from 'next/server'
 
 export async function GET() {

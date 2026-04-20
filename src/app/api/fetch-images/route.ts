@@ -14,7 +14,7 @@
 // preview grid. The admin approves or swaps before saving.
 // =============================================================================
 
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { WikimediaImage } from '@/types'
 

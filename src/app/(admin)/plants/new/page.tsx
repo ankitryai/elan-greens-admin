@@ -19,8 +19,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { createServiceRoleClient } from '@/lib/supabase'
-
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const

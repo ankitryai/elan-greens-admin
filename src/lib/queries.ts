@@ -9,7 +9,7 @@
 // so the caller (Server Action or page) decides how to handle it.
 // =============================================================================
 
-import { createServiceRoleClient } from '@/lib/supabase'
+import { createServiceRoleClient } from '@/lib/supabase.server'
 import type {
   PlantSpecies, PlantInstance, StaffMember,
   DashboardStats, PlantSpeciesFormData, PlantInstanceFormData, StaffFormData

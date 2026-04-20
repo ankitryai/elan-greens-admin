@@ -7,7 +7,7 @@
 // the botanical name as the top entity.
 // =============================================================================
 
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
 
 interface VisionWebEntity {

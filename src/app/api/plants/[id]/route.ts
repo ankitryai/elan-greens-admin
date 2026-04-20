@@ -1,7 +1,7 @@
 // PATCH /api/plants/[id] — updates an existing species.
 // Optionally replaces the main image if a new imageBase64 is provided.
 
-import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase'
+import { createServiceRoleClient, createServerSupabaseClient } from '@/lib/supabase.server'
 import { updateSpecies } from '@/lib/queries'
 import { plantSpeciesSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'

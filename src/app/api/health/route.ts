@@ -6,7 +6,7 @@
 // Can be called by a Vercel cron job daily — see DEPLOYMENT.md.
 // =============================================================================
 
-import { createServiceRoleClient } from '@/lib/supabase'
+import { createServiceRoleClient } from '@/lib/supabase.server'
 import { NextResponse } from 'next/server'
 
 export async function GET() {

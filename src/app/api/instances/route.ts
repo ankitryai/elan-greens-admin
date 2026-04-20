@@ -1,6 +1,6 @@
 // POST /api/instances — creates a new plant_instance (physical location)
 
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { createInstance } from '@/lib/queries'
 import { plantInstanceSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'

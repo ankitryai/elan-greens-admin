@@ -2,7 +2,7 @@
 // Used by the Add Species form before saving to prevent duplicates.
 
 import { findSpeciesByName } from '@/lib/queries'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {

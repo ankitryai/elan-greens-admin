@@ -1,7 +1,7 @@
 // Server Component — fetches staff member, passes to client form.
 
 import { notFound } from 'next/navigation'
-import { createServiceRoleClient } from '@/lib/supabase'
+import { createServiceRoleClient } from '@/lib/supabase.server'
 import type { StaffMember } from '@/types'
 import EditStaffForm from './EditStaffForm'
 
