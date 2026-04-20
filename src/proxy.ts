@@ -1,10 +1,10 @@
 // =============================================================================
-// Elan Greens Admin — Route Protection Middleware
+// Elan Greens Admin — Route Protection Proxy (Next.js 16)
 //
 // Runs on EVERY request before the page renders.
-// WHY middleware instead of checking auth inside each page?
-// Middleware runs at the edge (before the server function executes), so an
-// unauthorised visitor never touches any page code or DB query.
+// WHY proxy instead of checking auth inside each page?
+// Proxy runs before the server function executes, so an unauthorised visitor
+// never touches any page code or DB query.
 //
 // Two checks in sequence:
 //   1. Is there a valid Supabase session?  → redirect to /login if not
@@ -14,7 +14,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Start with a passthrough response so cookies can be read and refreshed.
   let response = NextResponse.next({ request })
 
