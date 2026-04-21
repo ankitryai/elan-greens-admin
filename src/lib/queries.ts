@@ -10,10 +10,8 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type {
-  PlantSpecies, PlantInstance, StaffMember,
-  DashboardStats, PlantSpeciesFormData, PlantInstanceFormData, StaffFormData
-} from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats } from '@/types'
+import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
 // Finds the next available P-number by reading the highest existing plant_id.

@@ -45,7 +45,7 @@ export const plantSpeciesSchema = z.object({
   interesting_fact:     z.string().max(300).optional().or(z.literal('')),
   life_span_description:z.string().max(100).optional().or(z.literal('')),
   not_applicable_parts: z.string().optional().or(z.literal('')),
-  tentative:            z.boolean().default(true),
+  tentative:            z.boolean(),
   notes:                z.string().max(300).optional().or(z.literal('')),
 })
 // Warn (not error) if botanical_name is a single word — likely incomplete.
@@ -56,15 +56,10 @@ export type PlantSpeciesFormData = z.infer<typeof plantSpeciesSchema>
 // ── plantInstanceSchema ───────────────────────────────────────────────────────
 // Used on the Add/Edit Location (plant instance) form.
 export const plantInstanceSchema = z.object({
-  internal_identification_no: z.coerce
-    .number({ error: 'Must be a number' })
-    .int('Must be a whole number')
-    .positive('Must be positive')
-    .optional()
-    .or(z.literal('')),
+  internal_identification_no: z.number().int('Must be a whole number').positive('Must be positive').optional().or(z.literal('')),
   custom_location_desc: z.string().max(100, 'Max 100 characters').optional().or(z.literal('')),
-  lat: z.coerce.number().min(-90).max(90).optional().or(z.literal('')),
-  lng: z.coerce.number().min(-180).max(180).optional().or(z.literal('')),
+  lat: z.number().min(-90).max(90).optional().or(z.literal('')),
+  lng: z.number().min(-180).max(180).optional().or(z.literal('')),
   date_of_plantation:   z.string().optional().or(z.literal('')),
 })
 

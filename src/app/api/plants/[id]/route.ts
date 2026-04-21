@@ -26,7 +26,10 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
   }
 
-  const fields: Partial<PlantSpecies> = { ...parsed.data }
+  // Convert empty strings to null so optional fields clear correctly in the DB
+  const fields = Object.fromEntries(
+    Object.entries(parsed.data).map(([k, v]) => [k, v === '' ? null : v])
+  ) as Partial<PlantSpecies>
 
   // Only replace the main image if a new photo was uploaded
   if (imageBase64 && typeof imageBase64 === 'string') {

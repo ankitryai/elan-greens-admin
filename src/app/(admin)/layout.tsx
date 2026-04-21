@@ -85,7 +85,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 function SignOutButton() {
   async function signOut() {
     'use server'
-    const { createServerSupabaseClient } = await import('@/lib/supabase')
+    const { createServerSupabaseClient } = await import('@/lib/supabase.server')
     const { redirect } = await import('next/navigation')
     const supabase = await createServerSupabaseClient()
     await supabase.auth.signOut()

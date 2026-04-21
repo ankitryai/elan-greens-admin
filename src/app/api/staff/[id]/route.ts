@@ -26,7 +26,9 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
   }
 
-  const fields: Partial<StaffMember> = { ...parsed.data }
+  const fields = Object.fromEntries(
+    Object.entries(parsed.data).map(([k, v]) => [k, v === '' ? null : v])
+  ) as Partial<StaffMember>
 
   if (photoBase64 && typeof photoBase64 === 'string') {
     const db = createServiceRoleClient()
