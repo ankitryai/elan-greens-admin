@@ -29,6 +29,7 @@ const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
 export default function EditSpeciesForm({ species }: { species: PlantSpecies }) {
   const router = useRouter()
   const [saving, setSaving]             = useState(false)
+  const [photoProcessing, setPhotoProcessing] = useState(false)
   const [newImageBase64, setNewImageBase64] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl]     = useState<string | null>(species.img_main_url)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -64,15 +65,28 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    // Compress before storing as base64 to keep request size small
-    const compressed = await compress(file, { maxWidthOrHeight: 800, useWebWorker: true, initialQuality: 0.75 })
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const b64 = reader.result as string
-      setNewImageBase64(b64)
-      setPreviewUrl(b64)
+    setPhotoProcessing(true)
+    setNewImageBase64(null)
+    try {
+      const compressed = await compress(file, { maxWidthOrHeight: 800, useWebWorker: true, initialQuality: 0.75 })
+      await new Promise<void>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const b64 = reader.result as string
+          setNewImageBase64(b64)
+          setPreviewUrl(b64)
+          resolve()
+        }
+        reader.onerror = () => reject(new Error('Failed to read image file'))
+        reader.readAsDataURL(compressed)
+      })
+      toast.success('Photo ready — click Save to upload it')
+    } catch (err) {
+      toast.error(`Could not process photo: ${err instanceof Error ? err.message : 'Try a different image'}`)
+      setPreviewUrl(species.img_main_url)
+    } finally {
+      setPhotoProcessing(false)
     }
-    reader.readAsDataURL(compressed)
   }
 
   async function onSubmit(data: PlantSpeciesFormData) {
@@ -119,9 +133,14 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           )}
           <input ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
             className="hidden" onChange={handlePhotoChange} />
-          <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
-            📷 Replace photo (optional)
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="outline" disabled={photoProcessing} onClick={() => fileRef.current?.click()}>
+              {photoProcessing ? 'Processing…' : '📷 Replace photo (optional)'}
+            </Button>
+            {newImageBase64 && (
+              <span className="text-xs text-green-700 font-medium">✓ New photo ready to upload</span>
+            )}
+          </div>
         </section>
 
         {/* Identity fields */}
@@ -240,8 +259,8 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         </div>
 
         <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={saving} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
-            {saving ? 'Saving…' : 'Save Changes'}
+          <Button type="submit" disabled={saving || photoProcessing} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
+            {saving ? 'Saving…' : photoProcessing ? 'Processing photo…' : 'Save Changes'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
         </div>

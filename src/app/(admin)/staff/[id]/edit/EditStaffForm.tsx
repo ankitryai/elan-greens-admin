@@ -18,9 +18,10 @@ const ROLES = ['Head Gardener', 'Assistant Gardener', 'Maintenance Staff'] as co
 
 export default function EditStaffForm({ member }: { member: StaffMember }) {
   const router = useRouter()
-  const [saving, setSaving]           = useState(false)
-  const [photoBase64, setPhotoBase64] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl]   = useState<string | null>(member.photo_url)
+  const [saving, setSaving]                 = useState(false)
+  const [photoProcessing, setPhotoProcessing] = useState(false)
+  const [photoBase64, setPhotoBase64]       = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl]         = useState<string | null>(member.photo_url)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<StaffFormData>({
@@ -37,14 +38,28 @@ export default function EditStaffForm({ member }: { member: StaffMember }) {
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: true, initialQuality: 0.8 })
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const b64 = reader.result as string
-      setPhotoBase64(b64)
-      setPreviewUrl(b64)
+    setPhotoProcessing(true)
+    setPhotoBase64(null)
+    try {
+      const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: true, initialQuality: 0.8 })
+      await new Promise<void>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const b64 = reader.result as string
+          setPhotoBase64(b64)
+          setPreviewUrl(b64)
+          resolve()
+        }
+        reader.onerror = () => reject(new Error('Failed to read photo file'))
+        reader.readAsDataURL(compressed)
+      })
+      toast.success('Photo ready — click Save to upload it')
+    } catch (err) {
+      toast.error(`Could not process photo: ${err instanceof Error ? err.message : 'Try a different image'}`)
+      setPreviewUrl(member.photo_url)
+    } finally {
+      setPhotoProcessing(false)
     }
-    reader.readAsDataURL(compressed)
   }
 
   async function onSubmit(data: StaffFormData) {
@@ -91,9 +106,14 @@ export default function EditStaffForm({ member }: { member: StaffMember }) {
           )}
           <input ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
             className="hidden" onChange={handlePhoto} />
-          <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
-            📷 {previewUrl ? 'Replace photo' : 'Add photo'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="outline" disabled={photoProcessing} onClick={() => fileRef.current?.click()}>
+              {photoProcessing ? 'Processing…' : `📷 ${previewUrl ? 'Replace photo' : 'Add photo'}`}
+            </Button>
+            {photoBase64 && (
+              <span className="text-xs text-green-700 font-medium">✓ New photo ready to upload</span>
+            )}
+          </div>
         </div>
 
         {/* Name */}
@@ -142,8 +162,8 @@ export default function EditStaffForm({ member }: { member: StaffMember }) {
         </div>
 
         <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={saving} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
-            {saving ? 'Saving…' : 'Save Changes'}
+          <Button type="submit" disabled={saving || photoProcessing} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
+            {saving ? 'Saving…' : photoProcessing ? 'Processing photo…' : 'Save Changes'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
         </div>
