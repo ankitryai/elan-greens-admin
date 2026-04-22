@@ -45,10 +45,14 @@ export async function POST(request: NextRequest) {
       .from('plant-images')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
 
-    if (!uploadError && uploadData) {
-      const { data: urlData } = db.storage.from('plant-images').getPublicUrl(uploadData.path)
-      imgMainUrl = urlData.publicUrl
+    if (uploadError) {
+      return NextResponse.json(
+        { error: `Image upload failed: ${uploadError.message}. Check that the "plant-images" storage bucket exists and is public in Supabase.` },
+        { status: 500 }
+      )
     }
+    const { data: urlData } = db.storage.from('plant-images').getPublicUrl(uploadData.path)
+    imgMainUrl = urlData.publicUrl
   }
 
   // Extract image URL fields that came from Wikimedia (already URLs, not base64)

@@ -40,11 +40,15 @@ export async function PATCH(
     const { data: uploadData, error: uploadError } = await db.storage
       .from('plant-images')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
-    if (!uploadError && uploadData) {
-      const { data: urlData } = db.storage.from('plant-images').getPublicUrl(uploadData.path)
-      fields.img_main_url = urlData.publicUrl
-      fields.img_main_attr = 'Uploaded by admin'
+    if (uploadError) {
+      return NextResponse.json(
+        { error: `Image upload failed: ${uploadError.message}. Check that the "plant-images" storage bucket exists and is public in Supabase.` },
+        { status: 500 }
+      )
     }
+    const { data: urlData } = db.storage.from('plant-images').getPublicUrl(uploadData.path)
+    fields.img_main_url = urlData.publicUrl
+    fields.img_main_attr = 'Uploaded by admin'
   }
 
   // Carry over any Wikimedia sub-image fields sent from the form
