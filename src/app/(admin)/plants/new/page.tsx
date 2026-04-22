@@ -52,10 +52,24 @@ export default function AddSpeciesPage() {
     setSaving(true)
     try {
       // Check for duplicate species before saving.
-      const checkRes = await fetch(`/api/check-duplicate?name=${encodeURIComponent(data.common_name)}`)
-      const { existing } = await checkRes.json() as { existing: { id: string; common_name: string } | null }
-      if (existing) {
-        setDuplicateSpecies({ id: existing.id, name: existing.common_name })
+      let checkFailed = false
+      try {
+        const checkRes = await fetch(`/api/check-duplicate?name=${encodeURIComponent(data.common_name)}`)
+        if (checkRes.ok) {
+          const { existing } = await checkRes.json() as { existing: { id: string; common_name: string } | null }
+          if (existing) {
+            setDuplicateSpecies({ id: existing.id, name: existing.common_name })
+            setSaving(false)
+            return
+          }
+        } else {
+          checkFailed = true
+        }
+      } catch {
+        checkFailed = true
+      }
+      if (checkFailed) {
+        toast.error('Could not check for duplicates. Please verify this species does not already exist before saving.')
         setSaving(false)
         return
       }

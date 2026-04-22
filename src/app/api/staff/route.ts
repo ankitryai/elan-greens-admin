@@ -29,10 +29,14 @@ export async function POST(request: NextRequest) {
     const { data: uploadData, error: uploadError } = await db.storage
       .from('staff-photos')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
-    if (!uploadError && uploadData) {
-      const { data: urlData } = db.storage.from('staff-photos').getPublicUrl(uploadData.path)
-      photoUrl = urlData.publicUrl
+    if (uploadError) {
+      return NextResponse.json(
+        { error: `Photo upload failed: ${uploadError.message}. Check that the "staff-photos" storage bucket exists and is public in Supabase.` },
+        { status: 500 }
+      )
     }
+    const { data: urlData } = db.storage.from('staff-photos').getPublicUrl(uploadData.path)
+    photoUrl = urlData.publicUrl
   }
 
   const member = await createStaff(parsed.data, photoUrl)

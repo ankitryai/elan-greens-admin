@@ -34,14 +34,15 @@ export async function POST(request: NextRequest) {
 
   // Upload main image to Supabase Storage if provided
   let imgMainUrl: string | null = null
-  if (imageBase64 && typeof imageBase64 === 'string') {
-    const db = createServiceRoleClient()
-    // Strip the data:image/...;base64, prefix to get raw bytes
+  let uploadedPath: string | null = null
+  const storageDb = imageBase64 ? createServiceRoleClient() : null
+
+  if (imageBase64 && typeof imageBase64 === 'string' && storageDb) {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
     const buffer = Buffer.from(base64Data, 'base64')
     const filename = `${Date.now()}_${parsed.data.common_name.replace(/\s+/g, '_')}.jpg`
 
-    const { data: uploadData, error: uploadError } = await db.storage
+    const { data: uploadData, error: uploadError } = await storageDb.storage
       .from('plant-images')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
 
@@ -51,7 +52,8 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
-    const { data: urlData } = db.storage.from('plant-images').getPublicUrl(uploadData.path)
+    uploadedPath = uploadData.path
+    const { data: urlData } = storageDb.storage.from('plant-images').getPublicUrl(uploadData.path)
     imgMainUrl = urlData.publicUrl
   }
 
@@ -71,6 +73,17 @@ export async function POST(request: NextRequest) {
     if (body[key]) (imageFields as Record<string, unknown>)[key] = body[key]
   }
 
-  const species = await createSpecies(parsed.data, imageFields)
-  return NextResponse.json(species, { status: 201 })
+  try {
+    const species = await createSpecies(parsed.data, imageFields)
+    return NextResponse.json(species, { status: 201 })
+  } catch (err) {
+    // DB insert failed — clean up the image we already uploaded so Storage stays consistent
+    if (uploadedPath && storageDb) {
+      await storageDb.storage.from('plant-images').remove([uploadedPath])
+    }
+    return NextResponse.json(
+      { error: `Failed to save species: ${err instanceof Error ? err.message : 'Database error'}` },
+      { status: 500 }
+    )
+  }
 }

@@ -38,10 +38,14 @@ export async function PATCH(
     const { data: uploadData, error: uploadError } = await db.storage
       .from('staff-photos')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
-    if (!uploadError && uploadData) {
-      const { data: urlData } = db.storage.from('staff-photos').getPublicUrl(uploadData.path)
-      fields.photo_url = urlData.publicUrl
+    if (uploadError) {
+      return NextResponse.json(
+        { error: `Photo upload failed: ${uploadError.message}. Check that the "staff-photos" storage bucket exists and is public in Supabase.` },
+        { status: 500 }
+      )
     }
+    const { data: urlData } = db.storage.from('staff-photos').getPublicUrl(uploadData.path)
+    fields.photo_url = urlData.publicUrl
   }
 
   const member = await updateStaff(id, fields)
