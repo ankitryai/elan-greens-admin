@@ -41,7 +41,7 @@ export default function EditStaffForm({ member }: { member: StaffMember }) {
     setPhotoProcessing(true)
     setPhotoBase64(null)
     try {
-      const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: true, initialQuality: 0.8 })
+      const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: false, initialQuality: 0.8 })
       await new Promise<void>((resolve, reject) => {
         const reader = new FileReader()
         reader.onloadend = () => {

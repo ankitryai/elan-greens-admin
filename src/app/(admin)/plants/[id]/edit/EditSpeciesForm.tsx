@@ -68,7 +68,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     setPhotoProcessing(true)
     setNewImageBase64(null)
     try {
-      const compressed = await compress(file, { maxWidthOrHeight: 800, useWebWorker: true, initialQuality: 0.75 })
+      const compressed = await compress(file, { maxWidthOrHeight: 800, useWebWorker: false, initialQuality: 0.75 })
       await new Promise<void>((resolve, reject) => {
         const reader = new FileReader()
         reader.onloadend = () => {

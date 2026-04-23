@@ -78,7 +78,7 @@ export default function ImageUploader({
     const compressed = await imageCompression(file, {
       maxWidthOrHeight: 800,
       initialQuality: 0.75,
-      useWebWorker: true,
+      useWebWorker: false,
     })
     setCompressedSize(compressed.size)
 
