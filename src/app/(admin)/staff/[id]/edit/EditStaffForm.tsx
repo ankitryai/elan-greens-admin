@@ -12,7 +12,29 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import compress from 'browser-image-compression'
+function compressToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const MAX = 400
+      let w = img.width, h = img.height
+      if (w > MAX || h > MAX) {
+        if (w >= h) { h = Math.round(h * MAX / w); w = MAX }
+        else        { w = Math.round(w * MAX / h); h = MAX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas not available')); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Failed to decode image')) }
+    img.src = objectUrl
+  })
+}
 
 const ROLES = ['Head Gardener', 'Assistant Gardener', 'Maintenance Staff'] as const
 
@@ -41,19 +63,10 @@ export default function EditStaffForm({ member }: { member: StaffMember }) {
     setPhotoProcessing(true)
     setPhotoBase64(null)
     try {
-      const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: false, initialQuality: 0.8 })
-      await new Promise<void>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const b64 = reader.result as string
-          setPhotoBase64(b64)
-          setPreviewUrl(b64)
-          resolve()
-        }
-        reader.onerror = () => reject(new Error('Failed to read photo file'))
-        reader.readAsDataURL(compressed)
-      })
-      toast.success('Photo ready — click Save to upload it')
+      const b64 = await compressToBase64(file)
+      setPhotoBase64(b64)
+      setPreviewUrl(b64)
+      toast.success(`Photo ready (${Math.round(b64.length * 0.75 / 1024)} KB) — click Save to upload`)
     } catch (err) {
       toast.error(`Could not process photo: ${err instanceof Error ? err.message : 'Try a different image'}`)
       setPreviewUrl(member.photo_url)

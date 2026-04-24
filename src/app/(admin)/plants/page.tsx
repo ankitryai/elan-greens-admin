@@ -72,6 +72,7 @@ export default async function PlantsPage({
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="text-left px-4 py-3 font-medium text-gray-600">ID</th>
+              <th className="px-4 py-3 font-medium text-gray-600 text-center w-8">📷</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Common Name</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Category</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
@@ -83,6 +84,12 @@ export default async function PlantsPage({
             {filtered.map(species => (
               <tr key={species.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-400 font-mono text-xs">{species.plant_id}</td>
+                <td className="px-4 py-3 text-center">
+                  {species.img_main_url
+                    ? <span title="Photo uploaded" className="text-green-600 text-base">●</span>
+                    : <span title="No photo" className="text-gray-300 text-base">○</span>
+                  }
+                </td>
                 <td className="px-4 py-3 font-medium text-gray-900">
                   {species.common_name}
                   {species.botanical_name && (

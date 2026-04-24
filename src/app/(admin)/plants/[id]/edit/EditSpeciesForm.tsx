@@ -19,7 +19,30 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import compress from 'browser-image-compression'
+// Canvas-based compression — no external lib, no web workers, works everywhere.
+function compressToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const MAX = 800
+      let w = img.width, h = img.height
+      if (w > MAX || h > MAX) {
+        if (w >= h) { h = Math.round(h * MAX / w); w = MAX }
+        else        { w = Math.round(w * MAX / h); h = MAX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas not available in this browser')); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.8))
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Failed to decode image — try a JPG or PNG')) }
+    img.src = objectUrl
+  })
+}
 
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
@@ -68,21 +91,15 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     setPhotoProcessing(true)
     setNewImageBase64(null)
     try {
-      const compressed = await compress(file, { maxWidthOrHeight: 800, useWebWorker: false, initialQuality: 0.75 })
-      await new Promise<void>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const b64 = reader.result as string
-          setNewImageBase64(b64)
-          setPreviewUrl(b64)
-          resolve()
-        }
-        reader.onerror = () => reject(new Error('Failed to read image file'))
-        reader.readAsDataURL(compressed)
-      })
-      toast.success('Photo ready — click Save to upload it')
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('Image too large (max 10 MB). Pick a smaller file.')
+      }
+      const b64 = await compressToBase64(file)
+      setNewImageBase64(b64)
+      setPreviewUrl(b64)
+      toast.success(`Photo ready (${Math.round(b64.length * 0.75 / 1024)} KB) — click Save to upload`)
     } catch (err) {
-      toast.error(`Could not process photo: ${err instanceof Error ? err.message : 'Try a different image'}`)
+      toast.error(`Photo processing failed: ${err instanceof Error ? err.message : 'Try a different image'}`)
       setPreviewUrl(species.img_main_url)
     } finally {
       setPhotoProcessing(false)
@@ -90,6 +107,10 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   }
 
   async function onSubmit(data: PlantSpeciesFormData) {
+    // Guard: if no existing image and no new image selected, warn but allow save
+    if (!species.img_main_url && !newImageBase64) {
+      toast.warning('Saving without a photo — use "Replace photo" to add one before saving')
+    }
     setSaving(true)
     try {
       const res = await fetch(`/api/plants/${species.id}`, {
@@ -101,10 +122,11 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         const err = await res.json() as { error: string }
         throw new Error(err.error)
       }
-      toast.success(`"${data.common_name}" updated`)
+      const saved = newImageBase64 ? `"${data.common_name}" updated with new photo` : `"${data.common_name}" updated`
+      toast.success(saved)
       router.push('/plants')
     } catch (err) {
-      toast.error(`Could not save. ${err instanceof Error ? err.message : 'Please try again.'}`)
+      toast.error(`Could not save: ${err instanceof Error ? err.message : 'Please try again.'}`)
     } finally {
       setSaving(false)
     }
