@@ -141,7 +141,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           <a href="/plants" className="hover:underline">Plants</a> /
         </p>
         <h1 className="text-2xl font-bold text-gray-900">Edit — {species.common_name}</h1>
-        <p className="text-xs text-gray-400 mt-1">ID: {species.plant_id}</p>
+        <p className="text-xs text-gray-400 mt-1">ID: {species.plant_id} · v2025-04-25</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
