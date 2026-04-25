@@ -14,6 +14,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
 import ImageUploader, { type IdentificationResult, type SubImages } from '@/components/ImageUploader'
+import { ErrorBanner } from '@/components/ErrorBanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,6 +31,7 @@ export default function AddSpeciesPage() {
   const [subImages, setSubImages]       = useState<SubImages | null>(null)
   const [aiConfidence, setAiConfidence] = useState<number | null>(null)
   const [saving, setSaving]             = useState(false)
+  const [serverError, setServerError]   = useState<string | null>(null)
   const [duplicateSpecies, setDuplicateSpecies] = useState<{ id: string; name: string } | null>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
@@ -91,7 +93,9 @@ export default function AddSpeciesPage() {
       toast.success(`"${data.common_name}" added to plant directory`)
       router.push('/plants')
     } catch (err) {
-      toast.error(`Could not save. ${err instanceof Error ? err.message : 'Please try again.'}`)
+      const msg = err instanceof Error ? err.message : 'Unexpected error. Please try again.'
+      setServerError(msg)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSaving(false)
     }
@@ -105,6 +109,10 @@ export default function AddSpeciesPage() {
           Take a photo to auto-identify, or fill in details manually.
         </p>
       </div>
+
+      {serverError && (
+        <ErrorBanner message={serverError} onClose={() => setServerError(null)} />
+      )}
 
       {/* Duplicate detected banner */}
       {duplicateSpecies && (

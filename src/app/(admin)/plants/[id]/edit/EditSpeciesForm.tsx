@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { ErrorBanner } from '@/components/ErrorBanner'
 // Canvas-based compression — no external lib, no web workers, works everywhere.
 function compressToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,6 +56,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   const [photoProcessing, setPhotoProcessing] = useState(false)
   const [newImageBase64, setNewImageBase64] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl]     = useState<string | null>(species.img_main_url)
+  const [serverError, setServerError]   = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
@@ -126,7 +128,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
       toast.success(saved)
       router.push('/plants')
     } catch (err) {
-      toast.error(`Could not save: ${err instanceof Error ? err.message : 'Please try again.'}`)
+      const msg = err instanceof Error ? err.message : 'Unexpected error. Please try again.'
+      setServerError(msg)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSaving(false)
     }
@@ -141,8 +145,12 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           <a href="/plants" className="hover:underline">Plants</a> /
         </p>
         <h1 className="text-2xl font-bold text-gray-900">Edit — {species.common_name}</h1>
-        <p className="text-xs text-gray-400 mt-1">ID: {species.plant_id} · v2025-04-25</p>
+        <p className="text-xs text-gray-400 mt-1">ID: {species.plant_id}</p>
       </div>
+
+      {serverError && (
+        <ErrorBanner message={serverError} onClose={() => setServerError(null)} />
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
 

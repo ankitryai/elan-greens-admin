@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   if (imageBase64 && typeof imageBase64 === 'string' && storageDb) {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
     const buffer = Buffer.from(base64Data, 'base64')
-    const filename = `${Date.now()}_${parsed.data.common_name.replace(/\s+/g, '_')}.jpg`
+    const filename = `${Date.now()}_${parsed.data.common_name.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`
 
     const { data: uploadData, error: uploadError } = await storageDb.storage
       .from('plant-images')

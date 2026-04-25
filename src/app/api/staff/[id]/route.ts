@@ -34,7 +34,7 @@ export async function PATCH(
     const db = createServiceRoleClient()
     const base64Data = photoBase64.replace(/^data:image\/\w+;base64,/, '')
     const buffer = Buffer.from(base64Data, 'base64')
-    const filename = `${Date.now()}_${parsed.data.name.replace(/\s+/g, '_')}.jpg`
+    const filename = `${Date.now()}_${parsed.data.name.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`
     const { data: uploadData, error: uploadError } = await db.storage
       .from('staff-photos')
       .upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })

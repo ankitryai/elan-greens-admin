@@ -13,15 +13,41 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import compress from 'browser-image-compression'
+import { ErrorBanner } from '@/components/ErrorBanner'
+
+function compressToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const MAX = 400
+      let w = img.width, h = img.height
+      if (w > MAX || h > MAX) {
+        if (w >= h) { h = Math.round(h * MAX / w); w = MAX }
+        else        { w = Math.round(w * MAX / h); h = MAX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas not available')); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Failed to decode image')) }
+    img.src = objectUrl
+  })
+}
 
 const ROLES = ['Head Gardener', 'Assistant Gardener', 'Maintenance Staff'] as const
 
 export default function AddStaffPage() {
   const router = useRouter()
-  const [saving, setSaving]           = useState(false)
-  const [photoBase64, setPhotoBase64] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl]   = useState<string | null>(null)
+  const [saving, setSaving]                 = useState(false)
+  const [photoProcessing, setPhotoProcessing] = useState(false)
+  const [photoBase64, setPhotoBase64]       = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl]         = useState<string | null>(null)
+  const [serverError, setServerError]       = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<StaffFormData>({
@@ -31,14 +57,18 @@ export default function AddStaffPage() {
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const compressed = await compress(file, { maxWidthOrHeight: 400, useWebWorker: true, initialQuality: 0.8 })
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const b64 = reader.result as string
+    setPhotoProcessing(true)
+    setPhotoBase64(null)
+    try {
+      const b64 = await compressToBase64(file)
       setPhotoBase64(b64)
       setPreviewUrl(b64)
+      toast.success(`Photo ready (${Math.round(b64.length * 0.75 / 1024)} KB) — click Save to upload`)
+    } catch (err) {
+      toast.error(`Could not process photo: ${err instanceof Error ? err.message : 'Try a different image'}`)
+    } finally {
+      setPhotoProcessing(false)
     }
-    reader.readAsDataURL(compressed)
   }
 
   async function onSubmit(data: StaffFormData) {
@@ -56,7 +86,9 @@ export default function AddStaffPage() {
       toast.success(`${data.name} added to the Green Team`)
       router.push('/staff')
     } catch (err) {
-      toast.error(`Could not save. ${err instanceof Error ? err.message : 'Please try again.'}`)
+      const msg = err instanceof Error ? err.message : 'Unexpected error. Please try again.'
+      setServerError(msg)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSaving(false)
     }
@@ -73,6 +105,10 @@ export default function AddStaffPage() {
         <h1 className="text-2xl font-bold text-gray-900">Add Team Member</h1>
       </div>
 
+      {serverError && (
+        <ErrorBanner message={serverError} onClose={() => setServerError(null)} />
+      )}
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
 
         {/* Photo */}
@@ -84,9 +120,14 @@ export default function AddStaffPage() {
           )}
           <input ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
             className="hidden" onChange={handlePhoto} />
-          <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
-            📷 {previewUrl ? 'Replace photo' : 'Add photo'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="outline" disabled={photoProcessing} onClick={() => fileRef.current?.click()}>
+              {photoProcessing ? 'Processing…' : `📷 ${previewUrl ? 'Replace photo' : 'Add photo'}`}
+            </Button>
+            {photoBase64 && (
+              <span className="text-xs text-green-700 font-medium">✓ Photo ready to upload</span>
+            )}
+          </div>
         </div>
 
         {/* Name */}
@@ -133,8 +174,8 @@ export default function AddStaffPage() {
         </div>
 
         <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={saving} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
-            {saving ? 'Saving…' : 'Add Member'}
+          <Button type="submit" disabled={saving || photoProcessing} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
+            {saving ? 'Saving…' : photoProcessing ? 'Processing photo…' : 'Add Member'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
         </div>
