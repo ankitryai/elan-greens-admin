@@ -57,14 +57,29 @@ export function formatStoragePercent(usedBytes: number): number {
 }
 
 // ── formatDate ────────────────────────────────────────────────────────────────
-// Converts ISO date string to "20 Apr 2026" for display in tables.
+// Converts ISO date string to "dd-mm-yyyy" (e.g. 20-04-2026).
 export function formatDate(isoDate: string | null): string {
   if (!isoDate) return '—'
-  return new Date(isoDate).toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  const d = new Date(isoDate)
+  const dd   = String(d.getDate()).padStart(2, '0')
+  const mm   = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}-${mm}-${yyyy}`
+}
+
+// ── formatDateTime ────────────────────────────────────────────────────────────
+// Converts ISO timestamp to "dd-mm-yyyy, hh:mm AM/PM" (e.g. 20-04-2026, 02:30 PM).
+export function formatDateTime(isoDate: string | null): string {
+  if (!isoDate) return '—'
+  const d = new Date(isoDate)
+  const dd   = String(d.getDate()).padStart(2, '0')
+  const mm   = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  let   hours = d.getHours()
+  const mins  = String(d.getMinutes()).padStart(2, '0')
+  const ampm  = hours >= 12 ? 'PM' : 'AM'
+  hours = hours % 12 || 12
+  return `${dd}-${mm}-${yyyy}, ${String(hours).padStart(2, '0')}:${mins} ${ampm}`
 }
 
 // ── splitPipe ─────────────────────────────────────────────────────────────────
