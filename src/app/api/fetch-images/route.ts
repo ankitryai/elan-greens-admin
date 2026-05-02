@@ -41,7 +41,7 @@ async function fetchCategoryImages(
     const url =
       `https://commons.wikimedia.org/w/api.php` +
       `?action=query&list=search&srsearch=${query}&srnamespace=6` +
-      `&srlimit=3&format=json&origin=*`
+      `&srlimit=8&format=json&origin=*`
 
     const res = await fetch(url)
     if (!res.ok) continue
@@ -61,12 +61,21 @@ async function fetchCategoryImages(
   return results
 }
 
+// Wikimedia media types we accept — everything else (PDF, audio, video, etc.) is skipped.
+const ACCEPTED_MEDIA_TYPES = new Set(['BITMAP', 'DRAWING'])
+
+// Image extensions as a final safety net in case mediatype is missing.
+const IMAGE_EXT = /\.(jpe?g|png|gif|svg|webp|tiff?)(\?|$)/i
+
 // Get the direct image URL and attribution for one Wikimedia file title.
+// Requests a 600 px wide thumbnail so we store web-friendly URLs, not
+// multi-megabyte originals.
 async function fetchImageInfo(title: string): Promise<WikimediaImage | null> {
   const url =
     `https://commons.wikimedia.org/w/api.php` +
     `?action=query&titles=${encodeURIComponent(title)}` +
-    `&prop=imageinfo&iiprop=url|extmetadata&format=json&origin=*`
+    `&prop=imageinfo&iiprop=url|extmetadata|mediatype&iiurlwidth=600` +
+    `&format=json&origin=*`
 
   const res = await fetch(url)
   if (!res.ok) return null
@@ -75,6 +84,8 @@ async function fetchImageInfo(title: string): Promise<WikimediaImage | null> {
     query?: { pages?: Record<string, {
       imageinfo?: [{
         url: string
+        thumburl?: string
+        mediatype?: string
         extmetadata?: {
           Artist?: { value: string }
           LicenseShortName?: { value: string }
@@ -87,12 +98,20 @@ async function fetchImageInfo(title: string): Promise<WikimediaImage | null> {
   const info = page?.imageinfo?.[0]
   if (!info?.url) return null
 
+  // Skip non-image files (PDFs, audio, video, old book scans, etc.)
+  const mediaType = info.mediatype ?? ''
+  if (!ACCEPTED_MEDIA_TYPES.has(mediaType)) return null
+
+  // Secondary check: URL must look like an image
+  const displayUrl = info.thumburl ?? info.url
+  if (!IMAGE_EXT.test(displayUrl)) return null
+
   // Build attribution string from metadata when available.
-  const artist = info.extmetadata?.Artist?.value?.replace(/<[^>]+>/g, '') ?? 'Unknown'
+  const artist = info.extmetadata?.Artist?.value?.replace(/<[^>]+>/g, '').trim() ?? 'Unknown'
   const license = info.extmetadata?.LicenseShortName?.value ?? 'CC license'
   const attribution = `© ${artist}, ${license}, via Wikimedia Commons`
 
-  return { url: info.url, attribution, title }
+  return { url: displayUrl, attribution, title }
 }
 
 export async function GET(request: NextRequest) {
