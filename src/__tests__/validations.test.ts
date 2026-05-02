@@ -8,7 +8,7 @@ import { plantSpeciesSchema, plantInstanceSchema, staffSchema } from '@/lib/vali
 // ── plantSpeciesSchema ────────────────────────────────────────────────────────
 
 describe('plantSpeciesSchema', () => {
-  const base = { common_name: 'Neem Tree', category: 'Tree' }
+  const base = { common_name: 'Neem Tree', category: 'Tree', tentative: false }
 
   it('accepts a minimal valid payload', () => {
     const result = plantSpeciesSchema.safeParse(base)
@@ -50,8 +50,8 @@ describe('plantInstanceSchema', () => {
     expect(plantInstanceSchema.safeParse({}).success).toBe(true)
   })
 
-  it('coerces numeric strings for lat/lng', () => {
-    const result = plantInstanceSchema.safeParse({ lat: '12.9182', lng: '77.6735' })
+  it('accepts numeric lat/lng values', () => {
+    const result = plantInstanceSchema.safeParse({ lat: 12.9182, lng: 77.6735 })
     expect(result.success).toBe(true)
     if (result.success) {
       expect(typeof result.data.lat).toBe('number')
