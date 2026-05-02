@@ -63,7 +63,7 @@ export default async function PlantsPage({
           className="px-4 py-2 rounded-lg text-white text-sm font-medium"
           style={{ backgroundColor: '#2E7D32' }}
         >
-          + Add Species
+          + Add Species 🌿
         </Link>
       </div>
 
