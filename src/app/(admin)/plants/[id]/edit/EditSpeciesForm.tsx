@@ -725,99 +725,136 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         </section>
 
         {/* ── Sub-images ───────────────────────────────────────────────────── */}
-        <section className="space-y-3">
+        <section className="space-y-4">
           <div className="flex items-center justify-between border-b pb-2">
-            <h2 className="text-base font-semibold text-gray-700">Sub-Images (Wikimedia Commons)</h2>
+            <h2 className="text-base font-semibold text-gray-700">Sub-Images</h2>
             <Button type="button" variant="outline" disabled={fetchingSubImages}
               onClick={() => handleFetchSubImages()} className="text-xs">
               {fetchingSubImages ? 'Fetching…' : fetchedSubImages ? '🔄 Re-fetch' : '🌐 Fetch sub-images'}
             </Button>
           </div>
 
-          {/* Status pills: show which categories have saved DB images */}
-          {filledCategories(species).length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {(['flowers','fruits','leaves','bark','roots'] as const).map(cat => {
-                const isSaved    = filledCategories(species).includes(cat)
-                const hasFetched = fetchedSubImages && (fetchedSubImages[cat as keyof SubImages]?.length ?? 0) > 0
-                return (
-                  <span key={cat} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium
-                    ${hasFetched ? 'bg-blue-100 text-blue-700' : isSaved ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                    {hasFetched ? '↑' : isSaved ? '✓' : '○'} {cat}
-                  </span>
-                )
-              })}
-            </div>
-          )}
+          {/* One row per category — always visible */}
+          {(['flowers','fruits','leaves','bark','roots'] as const).map(cat => {
+            const sp     = species as unknown as Record<string, string | null>
+            const prefix = cat === 'flowers' ? 'flower' : cat === 'fruits' ? 'fruit' : cat === 'leaves' ? 'leaf' : cat === 'bark' ? 'bark' : 'root'
 
-          {!fetchedSubImages && filledCategories(species).length === 0 && (
-            <p className="text-xs text-gray-400">
-              No sub-images saved yet. Click "Fetch sub-images" to pull flower, fruit, leaf,
-              bark and root photos from Wikimedia Commons (free, attribution included).
-            </p>
-          )}
+            // What's currently saved in the DB
+            const savedUrl1  = sp[`img_${prefix}_1_url`]
+            const savedAttr1 = sp[`img_${prefix}_1_attr`]
+            const savedUrl2  = sp[`img_${prefix}_2_url`]
+            const savedAttr2 = sp[`img_${prefix}_2_attr`]
+            const hasSaved   = !!(savedUrl1 || savedUrl2)
 
-          {/* Newly fetched images preview */}
-          {fetchedSubImages && (
-            <div className="space-y-4">
-              {(Object.entries(fetchedSubImages) as [string, { url: string; attribution: string }[]][]).map(([cat, imgs]) => (
-                <div key={cat}>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{cat}</p>
-                  {imgs.length > 0 ? (
-                    <div className="flex gap-2 flex-wrap">
-                      {imgs.map(img => (
-                        <div key={img.url} className="space-y-0.5">
+            // What a fresh fetch found this session
+            const fetchedImgs = fetchedSubImages?.[cat as keyof SubImages] ?? []
+            const hasFetched  = fetchedImgs.length > 0
+
+            return (
+              <div key={cat} className="space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {cat}
+                  {hasFetched && <span className="ml-2 text-blue-600 font-normal normal-case">↑ new fetch — will replace on save</span>}
+                  {!hasFetched && hasSaved && <span className="ml-2 text-green-600 font-normal normal-case">✓ saved</span>}
+                </p>
+
+                {/* Currently saved DB images */}
+                {hasSaved && !hasFetched && (
+                  <div className="flex gap-2 flex-wrap">
+                    {[{url: savedUrl1, attr: savedAttr1}, {url: savedUrl2, attr: savedAttr2}]
+                      .filter(i => i.url)
+                      .map((img, idx) => (
+                        <div key={idx} className="space-y-0.5">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={img.url} alt={cat}
-                            className="h-24 w-32 object-cover rounded-lg border border-gray-100" />
-                          <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
-                            title={img.attribution}>{img.attribution}</p>
+                          <img src={img.url!} alt={cat}
+                            className="h-24 w-32 object-cover rounded-lg border border-green-200" />
+                          {img.attr && (
+                            <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attr}>
+                              {img.attr}
+                            </p>
+                          )}
                         </div>
                       ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <p className="text-xs text-gray-400 italic">
-                        {filledCategories(species).includes(cat)
-                          ? '✓ Existing image kept'
-                          : 'No images found automatically — paste a URL below'}
-                      </p>
-                      {/* Manual URL fallback for this category */}
-                      <div className="flex flex-col gap-1 max-w-sm">
-                        <input
-                          type="url"
-                          placeholder="Paste image URL (https://…)"
-                          value={manualImages[cat]?.url ?? ''}
-                          onChange={e => setManualImages(m => ({
-                            ...m, [cat]: { ...(m[cat] ?? { attr: '' }), url: e.target.value }
-                          }))}
-                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Attribution (e.g. © Author, CC BY, via Source)"
-                          value={manualImages[cat]?.attr ?? ''}
-                          onChange={e => setManualImages(m => ({
-                            ...m, [cat]: { ...(m[cat] ?? { url: '' }), attr: e.target.value }
-                          }))}
-                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
-                        />
-                        {manualImages[cat]?.url && (
-                          // Live preview of pasted URL
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={manualImages[cat].url} alt={cat}
-                            className="h-20 w-28 object-cover rounded-lg border border-green-200 mt-1"
-                            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                            onLoad={e  => { (e.target as HTMLImageElement).style.display = 'block' }}
-                          />
-                        )}
+                  </div>
+                )}
+
+                {/* Newly fetched images (will replace saved on save) */}
+                {hasFetched && (
+                  <div className="flex gap-2 flex-wrap">
+                    {fetchedImgs.map(img => (
+                      <div key={img.url} className="space-y-0.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img.url} alt={cat}
+                          className="h-24 w-32 object-cover rounded-lg border border-blue-200" />
+                        <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
+                          title={img.attribution}>{img.attribution}</p>
                       </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* No images at all — show manual URL paste */}
+                {!hasSaved && !hasFetched && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-gray-400 italic">
+                      No image saved — fetch above or paste a URL manually
+                    </p>
+                    <div className="flex flex-col gap-1 max-w-sm">
+                      <input
+                        type="url"
+                        placeholder="Paste image URL (https://…)"
+                        value={manualImages[cat]?.url ?? ''}
+                        onChange={e => setManualImages(m => ({
+                          ...m, [cat]: { ...(m[cat] ?? { attr: '' }), url: e.target.value }
+                        }))}
+                        className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Attribution (e.g. © Author, CC BY, via Source)"
+                        value={manualImages[cat]?.attr ?? ''}
+                        onChange={e => setManualImages(m => ({
+                          ...m, [cat]: { ...(m[cat] ?? { url: '' }), attr: e.target.value }
+                        }))}
+                        className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
+                      />
+                      {manualImages[cat]?.url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={manualImages[cat].url} alt={cat}
+                          className="h-20 w-28 object-cover rounded-lg border border-green-200 mt-1"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          onLoad={e  => { (e.target as HTMLImageElement).style.display = 'block' }}
+                        />
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
-              <p className="text-xs text-amber-600">↑ These will be saved when you click Save Changes below.</p>
-            </div>
+                  </div>
+                )}
+
+                {/* Has saved images but fetch also found new ones — show manual paste too */}
+                {hasSaved && hasFetched && (
+                  <details className="text-xs text-gray-400">
+                    <summary className="cursor-pointer hover:text-gray-600">Previously saved image (will be replaced)</summary>
+                    <div className="flex gap-2 flex-wrap mt-1">
+                      {[{url: savedUrl1, attr: savedAttr1}, {url: savedUrl2, attr: savedAttr2}]
+                        .filter(i => i.url)
+                        .map((img, idx) => (
+                          <div key={idx} className="space-y-0.5 opacity-50">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={img.url!} alt={cat}
+                              className="h-16 w-20 object-cover rounded border border-gray-200" />
+                          </div>
+                        ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )
+          })}
+
+          {fetchedSubImages && (
+            <p className="text-xs text-amber-600 border-t pt-2">
+              ↑ Blue-bordered images are from the latest fetch and will be saved when you click Save Changes.
+            </p>
           )}
         </section>
 
