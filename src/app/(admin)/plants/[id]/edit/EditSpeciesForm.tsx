@@ -32,6 +32,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
+import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
+
+const PLANT_ID_LIMIT = 100
 
 // ── Canvas compression ───────────────────────────────────────────────────────
 function compressToBase64(file: File): Promise<string> {
@@ -149,6 +152,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   const [identifying, setIdentifying]             = useState(false)
   const [identifySuggestion, setIdentifySuggestion] = useState<IdentifySuggestion | null>(null)
   const [identifyExpanded, setIdentifyExpanded]   = useState(false)
+  const [plantIdUsed, setPlantIdUsed]             = useState(() =>
+    typeof window !== 'undefined' ? getApiCount('plantid') : 0
+  )
   const identifyFileRef = useRef<HTMLInputElement>(null)
   const mainFileRef     = useRef<HTMLInputElement>(null)
 
@@ -208,7 +214,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     setIdentifySuggestion(null)
     try {
       const b64 = await compressToBase64(file)
-      await runIdentification(b64)
+      await runIdentification({ imageBase64: b64 })
     } catch (err) {
       setServerError(`Plant.id failed: ${err instanceof Error ? err.message : 'Try again'}`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -217,16 +223,20 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
-  async function runIdentification(imageBase64: string) {
+  async function runIdentification(payload: { imageBase64?: string; imageUrl?: string }) {
     const res = await fetch('/api/identify-plant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64 }),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const err = await res.json() as { error: string }
       throw new Error(err.error ?? 'Identification failed')
     }
+    // Increment counter AFTER a successful API call
+    incrementApiCount('plantid')
+    setPlantIdUsed(getApiCount('plantid'))
+
     const result = await res.json() as PlantIdResult
     const suggestion = extractSuggestion(result)
     if (!suggestion) throw new Error('No suggestions returned by Plant.id')
@@ -382,143 +392,197 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         </section>
 
         {/* ── Plant.id Re-identification ───────────────────────────────────── */}
-        <section className="border border-blue-100 rounded-xl overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setIdentifyExpanded(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-sm font-medium text-blue-800 hover:bg-blue-100 transition-colors"
-          >
-            <span>🔍 Re-identify with Plant.id — auto-fill missing details</span>
-            <span className="text-blue-400 text-lg leading-none">{identifyExpanded ? '▲' : '▼'}</span>
-          </button>
+        {(() => {
+          const remaining    = PLANT_ID_LIMIT - plantIdUsed
+          const isLow        = remaining <= 10
+          const isExhausted  = remaining <= 0
+          // Count how many key fields are already filled — helps decide if a call is worth it
+          const filledFields = [
+            watch('botanical_name'), watch('description'),
+            watch('plant_family'),   watch('watering_needs'),
+          ].filter(v => (v ?? '').toString().trim()).length
+          const mostlyFilled = filledFields >= 3
 
-          {identifyExpanded && (
-            <div className="p-4 space-y-4 bg-white">
-              <p className="text-xs text-gray-500">
-                Upload a clear photo of this plant. Plant.id will suggest botanical name,
-                description, family, edible parts and watering needs. You choose whether to
-                apply only to empty fields or overwrite everything.
-              </p>
+          return (
+            <section className="border border-blue-100 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIdentifyExpanded(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-sm font-medium text-blue-800 hover:bg-blue-100 transition-colors"
+              >
+                <span>🔍 Re-identify with Plant.id — auto-fill missing details</span>
+                <div className="flex items-center gap-3">
+                  {/* API usage counter — always visible in the header */}
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full
+                    ${isExhausted ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-white text-blue-600'}`}>
+                    {isExhausted ? '✗ quota exhausted' : `${remaining} / ${PLANT_ID_LIMIT} hits left`}
+                  </span>
+                  <span className="text-blue-400 text-lg leading-none">{identifyExpanded ? '▲' : '▼'}</span>
+                </div>
+              </button>
 
-              {/* Hidden file input for identification */}
-              <input
-                ref={identifyFileRef}
-                type="file"
-                accept="image/jpeg,image/png"
-                capture="environment"
-                className="hidden"
-                onChange={handleIdentifyPhoto}
-              />
+              {identifyExpanded && (
+                <div className="p-4 space-y-4 bg-white">
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={identifying}
-                  onClick={() => identifyFileRef.current?.click()}
-                  className="text-xs"
-                >
-                  {identifying ? 'Identifying…' : '📷 Upload photo to identify'}
-                </Button>
+                  {/* Warn if quota is low */}
+                  {isExhausted && (
+                    <div className="text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
+                      ✗ Monthly Plant.id quota exhausted ({PLANT_ID_LIMIT} calls used). Resets on the 1st of next month.
+                    </div>
+                  )}
+                  {!isExhausted && isLow && (
+                    <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
+                      ⚠ Only {remaining} Plant.id call{remaining !== 1 ? 's' : ''} left this month — use carefully.
+                    </div>
+                  )}
 
-                {/* If a replacement photo is already loaded, offer to reuse it */}
-                {newImageBase64 && !identifying && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="text-xs text-blue-700 border-blue-300"
-                    onClick={async () => {
-                      setIdentifying(true)
-                      setIdentifySuggestion(null)
-                      try {
-                        await runIdentification(newImageBase64)
-                      } catch (err) {
-                        setServerError(`Plant.id failed: ${err instanceof Error ? err.message : 'Try again'}`)
-                        window.scrollTo({ top: 0, behavior: 'smooth' })
-                      } finally {
-                        setIdentifying(false)
-                      }
-                    }}
-                  >
-                    ↑ Use replacement photo above
-                  </Button>
-                )}
-              </div>
+                  {/* Warn if most fields already have data */}
+                  {mostlyFilled && !identifySuggestion && (
+                    <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-600">
+                      ℹ Most fields for this plant are already filled. A Plant.id call may not be needed — check the form above before proceeding.
+                    </div>
+                  )}
 
-              {/* Results panel */}
-              {identifySuggestion && (
-                <div className="space-y-3">
-                  {/* Confidence badge */}
-                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold
-                    ${identifySuggestion.confidence >= 70
-                      ? 'bg-green-100 text-green-800'
-                      : identifySuggestion.confidence >= 40
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-red-100 text-red-800'}`}>
-                    {identifySuggestion.confidence >= 70 ? '✓' : '⚠'}&nbsp;
-                    {identifySuggestion.confidence}% confident — {identifySuggestion.botanicalName}
-                  </div>
+                  {/* Hidden file input for uploading a different photo */}
+                  <input
+                    ref={identifyFileRef}
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleIdentifyPhoto}
+                  />
 
-                  {/* Suggestion diff table */}
-                  <div className="rounded-lg border border-gray-200 overflow-hidden text-xs">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left px-3 py-2 text-gray-500 font-medium w-32">Field</th>
-                          <th className="text-left px-3 py-2 text-gray-500 font-medium">Current value</th>
-                          <th className="text-left px-3 py-2 text-gray-500 font-medium">Plant.id suggests</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {([
-                          ['Botanical name', watch('botanical_name'), identifySuggestion.botanicalName],
-                          ['Description',    watch('description'),    identifySuggestion.description.slice(0, 80) + (identifySuggestion.description.length > 80 ? '…' : '')],
-                          ['Plant family',   watch('plant_family'),   identifySuggestion.plantFamily],
-                          ['Edible parts',   watch('edible_parts'),   identifySuggestion.edibleParts],
-                          ['Watering',       watch('watering_needs'), identifySuggestion.watering],
-                        ] as [string, string, string][]).map(([label, current, suggested]) => (
-                          <tr key={label} className={!current && suggested ? 'bg-green-50' : ''}>
-                            <td className="px-3 py-2 font-medium text-gray-600">{label}</td>
-                            <td className="px-3 py-2 text-gray-400 italic">
-                              {current || <span className="text-red-400">empty</span>}
-                            </td>
-                            <td className="px-3 py-2 text-gray-700">{suggested || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <p className="px-3 py-2 text-[10px] text-gray-400 bg-gray-50">
-                      Rows highlighted green = currently empty, will be filled.
-                    </p>
-                  </div>
+                  {/* Primary action: use existing saved photo — no re-upload */}
+                  <div className="space-y-2">
+                    {(species.img_main_url || newImageBase64) && (
+                      <div className="flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={newImageBase64 ?? species.img_main_url!}
+                          alt="Photo for identification"
+                          className="h-16 w-20 object-cover rounded-lg border border-gray-200 shrink-0"
+                        />
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-gray-500">
+                            {newImageBase64 ? 'Using replacement photo loaded above' : 'Using saved main photo'}
+                          </p>
+                          <Button
+                            type="button"
+                            disabled={identifying || isExhausted}
+                            className="text-xs"
+                            style={{ backgroundColor: '#2E7D32', color: 'white' }}
+                            onClick={async () => {
+                              setIdentifying(true)
+                              setIdentifySuggestion(null)
+                              try {
+                                // Pass URL directly — Plant.id fetches it server-side,
+                                // no re-upload from browser needed.
+                                const payload = newImageBase64
+                                  ? { imageBase64: newImageBase64 }
+                                  : { imageUrl: species.img_main_url! }
+                                await runIdentification(payload)
+                              } catch (err) {
+                                setServerError(`Plant.id failed: ${err instanceof Error ? err.message : 'Try again'}`)
+                                window.scrollTo({ top: 0, behavior: 'smooth' })
+                              } finally {
+                                setIdentifying(false)
+                              }
+                            }}
+                          >
+                            {identifying ? '🔍 Identifying…' : '🔍 Identify this plant'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button
+                    {/* Fallback / alternative: upload a different photo */}
+                    <button
                       type="button"
-                      className="text-xs"
-                      style={{ backgroundColor: '#2E7D32', color: 'white' }}
-                      onClick={() => applyIdentification(true)}
+                      disabled={identifying || isExhausted}
+                      onClick={() => identifyFileRef.current?.click()}
+                      className="text-xs text-blue-600 hover:underline disabled:opacity-40"
                     >
-                      ✓ Fill empty fields only (safe)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="text-xs text-amber-700 border-amber-300"
-                      onClick={() => {
-                        if (window.confirm('This will overwrite ALL fields listed above, including ones you have already filled in. Continue?')) {
-                          applyIdentification(false)
-                        }
-                      }}
-                    >
-                      ⚠ Overwrite all fields
-                    </Button>
+                      {species.img_main_url ? '↑ Use a different photo instead' : '📷 Upload a photo to identify'}
+                    </button>
                   </div>
+
+                  {/* Results panel */}
+                  {identifySuggestion && (
+                    <div className="space-y-3">
+                      {/* Confidence badge */}
+                      <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold
+                        ${identifySuggestion.confidence >= 70
+                          ? 'bg-green-100 text-green-800'
+                          : identifySuggestion.confidence >= 40
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-red-100 text-red-800'}`}>
+                        {identifySuggestion.confidence >= 70 ? '✓' : '⚠'}&nbsp;
+                        {identifySuggestion.confidence}% confident — {identifySuggestion.botanicalName}
+                      </div>
+
+                      {/* Suggestion diff table */}
+                      <div className="rounded-lg border border-gray-200 overflow-hidden text-xs">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="text-left px-3 py-2 text-gray-500 font-medium w-32">Field</th>
+                              <th className="text-left px-3 py-2 text-gray-500 font-medium">Current value</th>
+                              <th className="text-left px-3 py-2 text-gray-500 font-medium">Plant.id suggests</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {([
+                              ['Botanical name', watch('botanical_name'), identifySuggestion.botanicalName],
+                              ['Description',    watch('description'),    identifySuggestion.description.slice(0, 80) + (identifySuggestion.description.length > 80 ? '…' : '')],
+                              ['Plant family',   watch('plant_family'),   identifySuggestion.plantFamily],
+                              ['Edible parts',   watch('edible_parts'),   identifySuggestion.edibleParts],
+                              ['Watering',       watch('watering_needs'), identifySuggestion.watering],
+                            ] as [string, string, string][]).map(([label, current, suggested]) => (
+                              <tr key={label} className={!current && suggested ? 'bg-green-50' : ''}>
+                                <td className="px-3 py-2 font-medium text-gray-600">{label}</td>
+                                <td className="px-3 py-2 text-gray-400 italic">
+                                  {current || <span className="text-red-400">empty</span>}
+                                </td>
+                                <td className="px-3 py-2 text-gray-700">{suggested || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="px-3 py-2 text-[10px] text-gray-400 bg-gray-50">
+                          Rows highlighted green = currently empty, will be filled.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          className="text-xs"
+                          style={{ backgroundColor: '#2E7D32', color: 'white' }}
+                          onClick={() => applyIdentification(true)}
+                        >
+                          ✓ Fill empty fields only (safe)
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="text-xs text-amber-700 border-amber-300"
+                          onClick={() => {
+                            if (window.confirm('This will overwrite ALL fields listed above, including ones you have already filled in. Continue?')) {
+                              applyIdentification(false)
+                            }
+                          }}
+                        >
+                          ⚠ Overwrite all fields
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-        </section>
+            </section>
+          )
+        })()}
 
         {/* ── Plant Identity ───────────────────────────────────────────────── */}
         <section className="space-y-4">

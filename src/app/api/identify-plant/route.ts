@@ -19,9 +19,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { imageBase64 } = await request.json() as { imageBase64: string }
-  if (!imageBase64) {
-    return NextResponse.json({ error: 'No image provided' }, { status: 400 })
+  const body = await request.json() as { imageBase64?: string; imageUrl?: string }
+  const { imageBase64, imageUrl } = body
+
+  // Plant.id v2 accepts either a base64 data URI or a publicly accessible URL.
+  // Prefer URL when available — avoids sending large payloads from the browser.
+  const imagePayload = imageUrl ?? imageBase64
+  if (!imagePayload) {
+    return NextResponse.json({ error: 'No image provided (pass imageBase64 or imageUrl)' }, { status: 400 })
   }
 
   const response = await fetch('https://api.plant.id/v2/identify', {
@@ -31,7 +36,7 @@ export async function POST(request: NextRequest) {
       'Api-Key': process.env.PLANT_ID_API_KEY!,
     },
     body: JSON.stringify({
-      images: [imageBase64],
+      images: [imagePayload],
       // Request extra detail fields that map to our plant_species columns.
       plant_details: ['common_names', 'wiki_description', 'taxonomy', 'edible_parts', 'watering'],
     }),
