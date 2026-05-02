@@ -93,11 +93,6 @@ function filledCategories(s: PlantSpecies): string[] {
   return filled
 }
 
-// Which categories are missing?
-function emptyCategories(s: PlantSpecies): string[] {
-  const all = ['flowers', 'fruits', 'leaves', 'bark', 'roots']
-  return all.filter(c => !filledCategories(s).includes(c))
-}
 
 // ── Plant.id suggestion → form-ready fields ──────────────────────────────────
 interface IdentifySuggestion {
@@ -269,32 +264,30 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   }
 
   // ── Sub-image fetch ────────────────────────────────────────────────────────
-  async function handleFetchSubImages(forceAll: boolean) {
-    const name = species.botanical_name || species.common_name
-    const filled = filledCategories(species)
-    const empty  = emptyCategories(species)
+  // Always fetches all 5 categories — no pre-save skip optimisation.
+  // buildSubImageFields already ensures empty Wikimedia results don't null-out
+  // existing DB images on save.
+  // overrideName: pass an identified botanical name from Plant.id before it's
+  //   been saved to the form, so Wikimedia can use it immediately.
+  async function handleFetchSubImages(overrideName?: string) {
+    const botanicalName = overrideName ?? watch('botanical_name') ?? species.botanical_name ?? ''
+    const commonName    = species.common_name
 
-    let msg = `Fetch sub-images for "${species.common_name}" from Wikimedia Commons?\n\n`
-    if (!forceAll && filled.length > 0) {
-      msg += `Already saved: ${filled.join(', ')}\n`
-      msg += empty.length > 0
-        ? `Will only fetch: ${empty.join(', ')}`
-        : `All categories already have images.`
-    } else if (forceAll && filled.length > 0) {
-      msg += `Re-fetching ALL categories — existing images will be replaced.`
-    }
-
-    if (!window.confirm(msg)) return
-
-    // If all categories are filled and not forcing, nothing to do
-    if (!forceAll && empty.length === 0) {
-      toast.warning('All categories already have images. Use "Re-fetch all" to replace them.')
+    if (!botanicalName && !commonName) {
+      toast.warning('Fill in the botanical or common name first so Wikimedia knows what to search for.')
       return
     }
 
-    const skipCats = forceAll ? [] : filled
-    const params   = new URLSearchParams({ name })
-    if (skipCats.length > 0) params.set('skip', skipCats.join(','))
+    const filledCatsNow = filledCategories(species)
+    let msg = `Fetch sub-images for "${commonName}" from Wikimedia Commons?`
+    if (filledCatsNow.length > 0) {
+      msg += `\n\nNote: ${filledCatsNow.join(', ')} already have saved images. New results will replace them on Save.`
+    }
+    if (!window.confirm(msg)) return
+
+    const params = new URLSearchParams()
+    if (botanicalName) params.set('name', botanicalName)
+    if (commonName)    params.set('common', commonName)
 
     setFetchingSubImages(true)
     try {
@@ -304,14 +297,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
       setFetchedSubImages(data)
       const total = Object.values(data).flat().length
       if (total === 0) {
-        toast.warning('No new images found on Wikimedia. Try filling in the botanical name first.')
+        toast.warning('No images found on Wikimedia for this plant. Wikimedia coverage varies — try again later or add images manually.')
       } else {
-        const kept = forceAll ? 0 : filled.length
-        toast.success(
-          `${total} image${total !== 1 ? 's' : ''} fetched` +
-          (kept > 0 ? ` · ${kept} existing categor${kept !== 1 ? 'ies' : 'y'} kept` : '') +
-          ' — review below, then Save Changes'
-        )
+        toast.success(`${total} image${total !== 1 ? 's' : ''} fetched — review below, then Save Changes`)
       }
     } catch (err) {
       setServerError(`Sub-image fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
@@ -351,8 +339,6 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   }
 
   const currentNAP = (watch('not_applicable_parts') ?? '').split('|').filter(Boolean)
-  const filledCats = filledCategories(species)
-  const emptyCats  = emptyCategories(species)
 
   return (
     <div className="space-y-8 max-w-2xl">
@@ -576,6 +562,24 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                           ⚠ Overwrite all fields
                         </Button>
                       </div>
+
+                      {/* One-click Wikimedia fetch using the just-identified botanical name */}
+                      {identifySuggestion.botanicalName && (
+                        <div className="border-t pt-3">
+                          <p className="text-xs text-gray-500 mb-2">
+                            Now fetch flower, fruit, leaf, bark and root photos from Wikimedia using the identified name:
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={fetchingSubImages}
+                            className="text-xs text-blue-700 border-blue-300"
+                            onClick={() => handleFetchSubImages(identifySuggestion!.botanicalName)}
+                          >
+                            {fetchingSubImages ? 'Fetching…' : `🌐 Fetch sub-images for "${identifySuggestion.botanicalName}"`}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -695,50 +699,31 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         <section className="space-y-3">
           <div className="flex items-center justify-between border-b pb-2">
             <h2 className="text-base font-semibold text-gray-700">Sub-Images (Wikimedia Commons)</h2>
-            <div className="flex gap-2">
-              {/* Only show "Fetch missing" if there are empty categories */}
-              {emptyCats.length > 0 && (
-                <Button type="button" variant="outline" disabled={fetchingSubImages}
-                  onClick={() => handleFetchSubImages(false)} className="text-xs">
-                  {fetchingSubImages ? 'Fetching…' : `🌐 Fetch missing (${emptyCats.length})`}
-                </Button>
-              )}
-              {/* Always allow re-fetch all */}
-              {filledCats.length > 0 && (
-                <Button type="button" variant="outline" disabled={fetchingSubImages}
-                  onClick={() => handleFetchSubImages(true)} className="text-xs text-amber-700 border-amber-300">
-                  {fetchingSubImages ? '…' : '🔄 Re-fetch all'}
-                </Button>
-              )}
-              {/* First fetch — no existing images at all */}
-              {filledCats.length === 0 && emptyCats.length === 0 && (
-                <Button type="button" variant="outline" disabled={fetchingSubImages}
-                  onClick={() => handleFetchSubImages(false)} className="text-xs">
-                  {fetchingSubImages ? 'Fetching…' : '🌐 Fetch sub-images'}
-                </Button>
-              )}
-            </div>
+            <Button type="button" variant="outline" disabled={fetchingSubImages}
+              onClick={() => handleFetchSubImages()} className="text-xs">
+              {fetchingSubImages ? 'Fetching…' : fetchedSubImages ? '🔄 Re-fetch' : '🌐 Fetch sub-images'}
+            </Button>
           </div>
 
-          {/* Status of existing DB images */}
-          {filledCats.length > 0 && (
+          {/* Status pills: show which categories have saved DB images */}
+          {filledCategories(species).length > 0 && (
             <div className="flex flex-wrap gap-2">
               {(['flowers','fruits','leaves','bark','roots'] as const).map(cat => {
-                const isFilled = filledCats.includes(cat)
+                const isSaved    = filledCategories(species).includes(cat)
                 const hasFetched = fetchedSubImages && (fetchedSubImages[cat as keyof SubImages]?.length ?? 0) > 0
                 return (
                   <span key={cat} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium
-                    ${hasFetched ? 'bg-blue-100 text-blue-700' : isFilled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                    {hasFetched ? '↑' : isFilled ? '✓' : '○'} {cat}
+                    ${hasFetched ? 'bg-blue-100 text-blue-700' : isSaved ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                    {hasFetched ? '↑' : isSaved ? '✓' : '○'} {cat}
                   </span>
                 )
               })}
             </div>
           )}
 
-          {!fetchedSubImages && filledCats.length === 0 && (
+          {!fetchedSubImages && filledCategories(species).length === 0 && (
             <p className="text-xs text-gray-400">
-              No sub-images saved yet. Click "Fetch missing" to pull flower, fruit, leaf,
+              No sub-images saved yet. Click "Fetch sub-images" to pull flower, fruit, leaf,
               bark and root photos from Wikimedia Commons (free, attribution included).
             </p>
           )}
@@ -751,7 +736,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{cat}</p>
                   {imgs.length === 0 ? (
                     <p className="text-xs text-gray-400 italic">
-                      {filledCats.includes(cat) ? '✓ Existing image kept (not replaced)' : 'No images found'}
+                      {filledCategories(species).includes(cat) ? '✓ Existing image kept (not replaced)' : 'No images found'}
                     </p>
                   ) : (
                     <div className="flex gap-2 flex-wrap">
