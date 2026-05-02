@@ -126,13 +126,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Botanical name required' }, { status: 400 })
   }
 
-  // Run all 5 category searches in parallel — avoids a waterfall of 5 sequential fetches.
+  // ?skip=flowers,bark  → skip categories that already have images in the DB.
+  // This prevents overwriting good existing images with inferior ones.
+  const skipParam = request.nextUrl.searchParams.get('skip') ?? ''
+  const skip = new Set(skipParam.split(',').map(s => s.trim()).filter(Boolean))
+
+  // Run all 5 category searches in parallel — skip already-filled ones.
   const [flowers, fruits, leaves, bark, roots] = await Promise.all([
-    fetchCategoryImages(botanicalName, CATEGORIES.flowers),
-    fetchCategoryImages(botanicalName, CATEGORIES.fruits),
-    fetchCategoryImages(botanicalName, CATEGORIES.leaves),
-    fetchCategoryImages(botanicalName, CATEGORIES.bark),
-    fetchCategoryImages(botanicalName, CATEGORIES.roots),
+    skip.has('flowers') ? Promise.resolve([]) : fetchCategoryImages(botanicalName, CATEGORIES.flowers),
+    skip.has('fruits')  ? Promise.resolve([]) : fetchCategoryImages(botanicalName, CATEGORIES.fruits),
+    skip.has('leaves')  ? Promise.resolve([]) : fetchCategoryImages(botanicalName, CATEGORIES.leaves),
+    skip.has('bark')    ? Promise.resolve([]) : fetchCategoryImages(botanicalName, CATEGORIES.bark),
+    skip.has('roots')   ? Promise.resolve([]) : fetchCategoryImages(botanicalName, CATEGORIES.roots),
   ])
 
   return NextResponse.json({ flowers, fruits, leaves, bark, roots })

@@ -1,10 +1,20 @@
 'use client'
 // =============================================================================
-// Edit Species Form — pre-populated with existing species data.
+// Edit Species Form
 //
-// WHY no ImageUploader here? The AI identification flow is only for NEW species.
-// On edit, the admin can optionally replace the main photo via a simple file
-// input without re-running Plant.id. Sub-images are left as stored.
+// Two AI-assist features:
+//
+// 1. Sub-images from Wikimedia Commons
+//    - "Fetch missing" only pulls categories not yet saved in the DB.
+//    - "Re-fetch all" replaces everything (explicit override).
+//    - buildSubImageFields skips categories with no new images so existing
+//      DB values are never nulled out by an empty Wikimedia response.
+//
+// 2. Plant.id re-identification panel
+//    - Upload any photo (or reuse the replacement photo above).
+//    - Shows confidence + suggested values for each field.
+//    - "Fill empty fields" applies only where the field is currently blank.
+//    - "Overwrite all" replaces everything (explicit override).
 // =============================================================================
 
 import { useState, useRef } from 'react'
@@ -15,13 +25,15 @@ import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
 import type { PlantSpecies } from '@/types'
 import type { SubImages } from '@/components/ImageUploader'
+import type { PlantIdResult } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
-// Canvas-based compression — no external lib, no web workers, works everywhere.
+
+// ── Canvas compression ───────────────────────────────────────────────────────
 function compressToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -46,7 +58,10 @@ function compressToBase64(file: File): Promise<string> {
   })
 }
 
-// Flatten SubImages into the flat DB column structure expected by the PATCH route.
+// ── Sub-image helpers ────────────────────────────────────────────────────────
+
+// Only include categories that have actual new images — never null-out existing
+// DB values because Wikimedia found nothing for that category.
 function buildSubImageFields(subImages: SubImages): Record<string, string | null> {
   const f: Record<string, string | null> = {}
   const map: [string, keyof SubImages][] = [
@@ -55,17 +70,62 @@ function buildSubImageFields(subImages: SubImages): Record<string, string | null
   ]
   for (const [prefix, key] of map) {
     const imgs = subImages[key]
-    f[`img_${prefix}_1_url`]  = imgs[0]?.url ?? null
+    if (imgs.length === 0) continue  // no new images — leave existing DB values intact
+    f[`img_${prefix}_1_url`]  = imgs[0]?.url  ?? null
     f[`img_${prefix}_1_attr`] = imgs[0]?.attribution ?? null
-    f[`img_${prefix}_2_url`]  = imgs[1]?.url ?? null
+    f[`img_${prefix}_2_url`]  = imgs[1]?.url  ?? null
     f[`img_${prefix}_2_attr`] = imgs[1]?.attribution ?? null
   }
   return f
 }
 
-// Returns true if the species already has at least one sub-image saved.
-function hasExistingSubImages(s: PlantSpecies): boolean {
-  return !!(s.img_flower_1_url || s.img_fruit_1_url || s.img_leaf_1_url || s.img_bark_1_url || s.img_root_1_url)
+// Which categories already have at least one image saved?
+function filledCategories(s: PlantSpecies): string[] {
+  const filled: string[] = []
+  if (s.img_flower_1_url) filled.push('flowers')
+  if (s.img_fruit_1_url)  filled.push('fruits')
+  if (s.img_leaf_1_url)   filled.push('leaves')
+  if (s.img_bark_1_url)   filled.push('bark')
+  if (s.img_root_1_url)   filled.push('roots')
+  return filled
+}
+
+// Which categories are missing?
+function emptyCategories(s: PlantSpecies): string[] {
+  const all = ['flowers', 'fruits', 'leaves', 'bark', 'roots']
+  return all.filter(c => !filledCategories(s).includes(c))
+}
+
+// ── Plant.id suggestion → form-ready fields ──────────────────────────────────
+interface IdentifySuggestion {
+  botanicalName: string
+  commonName:    string
+  confidence:    number   // 0–100 percentage
+  description:   string
+  plantFamily:   string
+  edibleParts:   string
+  watering:      string
+}
+
+function extractSuggestion(result: PlantIdResult): IdentifySuggestion | null {
+  const top = result.suggestions?.[0]
+  if (!top) return null
+  const d = top.plant_details
+  const wateringRaw = d.watering
+  let watering = ''
+  if (wateringRaw) {
+    const avg = (wateringRaw.min + wateringRaw.max) / 2
+    watering = avg < 1.5 ? 'Low' : avg < 2.5 ? 'Medium' : 'High'
+  }
+  return {
+    botanicalName: top.plant_name ?? '',
+    commonName:    d.common_names?.[0] ?? '',
+    confidence:    Math.round((top.probability ?? 0) * 100),
+    description:   d.wiki_description?.value ?? '',
+    plantFamily:   d.taxonomy?.family ?? '',
+    edibleParts:   d.edible_parts?.join(', ') ?? '',
+    watering,
+  }
 }
 
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
@@ -75,14 +135,22 @@ const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
 
 export default function EditSpeciesForm({ species }: { species: PlantSpecies }) {
   const router = useRouter()
-  const [saving, setSaving]             = useState(false)
-  const [photoProcessing, setPhotoProcessing] = useState(false)
-  const [newImageBase64, setNewImageBase64] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl]     = useState<string | null>(species.img_main_url)
-  const [serverError, setServerError]   = useState<string | null>(null)
+  const [saving, setSaving]                       = useState(false)
+  const [photoProcessing, setPhotoProcessing]     = useState(false)
+  const [newImageBase64, setNewImageBase64]       = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl]               = useState<string | null>(species.img_main_url)
+  const [serverError, setServerError]             = useState<string | null>(null)
+
+  // Sub-images state
   const [fetchingSubImages, setFetchingSubImages] = useState(false)
   const [fetchedSubImages, setFetchedSubImages]   = useState<SubImages | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+
+  // Plant.id identification state
+  const [identifying, setIdentifying]             = useState(false)
+  const [identifySuggestion, setIdentifySuggestion] = useState<IdentifySuggestion | null>(null)
+  const [identifyExpanded, setIdentifyExpanded]   = useState(false)
+  const identifyFileRef = useRef<HTMLInputElement>(null)
+  const mainFileRef     = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
     resolver: zodResolver(plantSpeciesSchema),
@@ -112,15 +180,14 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     },
   })
 
+  // ── Main photo replacement ─────────────────────────────────────────────────
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setPhotoProcessing(true)
     setNewImageBase64(null)
     try {
-      if (file.size > 10 * 1024 * 1024) {
-        throw new Error('Image too large (max 10 MB). Pick a smaller file.')
-      }
+      if (file.size > 10 * 1024 * 1024) throw new Error('Image too large (max 10 MB). Pick a smaller file.')
       const b64 = await compressToBase64(file)
       setNewImageBase64(b64)
       setPreviewUrl(b64)
@@ -133,24 +200,108 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
-  async function handleFetchSubImages() {
+  // ── Plant.id identification ────────────────────────────────────────────────
+  async function handleIdentifyPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIdentifying(true)
+    setIdentifySuggestion(null)
+    try {
+      const b64 = await compressToBase64(file)
+      await runIdentification(b64)
+    } catch (err) {
+      setServerError(`Plant.id failed: ${err instanceof Error ? err.message : 'Try again'}`)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } finally {
+      setIdentifying(false)
+    }
+  }
+
+  async function runIdentification(imageBase64: string) {
+    const res = await fetch('/api/identify-plant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64 }),
+    })
+    if (!res.ok) {
+      const err = await res.json() as { error: string }
+      throw new Error(err.error ?? 'Identification failed')
+    }
+    const result = await res.json() as PlantIdResult
+    const suggestion = extractSuggestion(result)
+    if (!suggestion) throw new Error('No suggestions returned by Plant.id')
+    setIdentifySuggestion(suggestion)
+    toast.success(`Plant.id: ${suggestion.confidence}% confident — ${suggestion.botanicalName}`)
+  }
+
+  // Apply Plant.id suggestion to form fields.
+  // onlyEmpty = true  → only fill fields that are currently blank (safe merge)
+  // onlyEmpty = false → overwrite all fields (explicit override)
+  function applyIdentification(onlyEmpty: boolean) {
+    if (!identifySuggestion) return
+    const s = identifySuggestion
+
+    const set = (field: keyof PlantSpeciesFormData, value: string) => {
+      if (!value) return
+      const current = (watch(field) ?? '') as string
+      if (!onlyEmpty || !current.trim()) {
+        setValue(field, value as never)
+      }
+    }
+
+    set('botanical_name',  s.botanicalName)
+    set('description',     s.description.slice(0, 500))
+    set('plant_family',    s.plantFamily)
+    set('edible_parts',    s.edibleParts)
+    set('watering_needs',  s.watering)
+
+    toast.success(onlyEmpty ? 'Empty fields filled from Plant.id ✓' : 'All fields overwritten from Plant.id ✓')
+  }
+
+  // ── Sub-image fetch ────────────────────────────────────────────────────────
+  async function handleFetchSubImages(forceAll: boolean) {
     const name = species.botanical_name || species.common_name
-    const confirmed = window.confirm(
-      `Fetch open-source sub-images for "${species.common_name}" from Wikimedia Commons?\n\n` +
-      `This is free (no API key) but uses a network call. Only do this once per plant.`
-    )
-    if (!confirmed) return
+    const filled = filledCategories(species)
+    const empty  = emptyCategories(species)
+
+    let msg = `Fetch sub-images for "${species.common_name}" from Wikimedia Commons?\n\n`
+    if (!forceAll && filled.length > 0) {
+      msg += `Already saved: ${filled.join(', ')}\n`
+      msg += empty.length > 0
+        ? `Will only fetch: ${empty.join(', ')}`
+        : `All categories already have images.`
+    } else if (forceAll && filled.length > 0) {
+      msg += `Re-fetching ALL categories — existing images will be replaced.`
+    }
+
+    if (!window.confirm(msg)) return
+
+    // If all categories are filled and not forcing, nothing to do
+    if (!forceAll && empty.length === 0) {
+      toast.warning('All categories already have images. Use "Re-fetch all" to replace them.')
+      return
+    }
+
+    const skipCats = forceAll ? [] : filled
+    const params   = new URLSearchParams({ name })
+    if (skipCats.length > 0) params.set('skip', skipCats.join(','))
+
     setFetchingSubImages(true)
     try {
-      const res = await fetch(`/api/fetch-images?name=${encodeURIComponent(name)}`)
+      const res = await fetch(`/api/fetch-images?${params}`)
       if (!res.ok) throw new Error('Wikimedia fetch failed')
       const data = await res.json() as SubImages
       setFetchedSubImages(data)
       const total = Object.values(data).flat().length
       if (total === 0) {
-        toast.warning('No images found on Wikimedia for this plant. Try saving with the botanical name filled in.')
+        toast.warning('No new images found on Wikimedia. Try filling in the botanical name first.')
       } else {
-        toast.success(`${total} sub-images fetched — review below, then click Save Changes`)
+        const kept = forceAll ? 0 : filled.length
+        toast.success(
+          `${total} image${total !== 1 ? 's' : ''} fetched` +
+          (kept > 0 ? ` · ${kept} existing categor${kept !== 1 ? 'ies' : 'y'} kept` : '') +
+          ' — review below, then Save Changes'
+        )
       }
     } catch (err) {
       setServerError(`Sub-image fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
@@ -160,6 +311,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
+  // ── Save ───────────────────────────────────────────────────────────────────
   async function onSubmit(data: PlantSpeciesFormData) {
     if (!species.img_main_url && !newImageBase64) {
       toast.warning('Saving without a photo — use "Replace photo" to add one before saving')
@@ -189,6 +341,8 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   }
 
   const currentNAP = (watch('not_applicable_parts') ?? '').split('|').filter(Boolean)
+  const filledCats = filledCategories(species)
+  const emptyCats  = emptyCategories(species)
 
   return (
     <div className="space-y-8 max-w-2xl">
@@ -206,17 +360,19 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
 
-        {/* Photo replacement (optional) */}
+        {/* ── Main Photo ───────────────────────────────────────────────────── */}
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Main Photo</h2>
           {previewUrl && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="Current plant photo" className="h-40 w-48 object-cover rounded-lg border" />
+            <img src={previewUrl} alt="Current plant photo"
+              className="h-40 w-48 object-cover rounded-lg border" />
           )}
-          <input ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
-            className="hidden" onChange={handlePhotoChange} />
+          <input ref={mainFileRef} type="file" accept="image/jpeg,image/png"
+            capture="environment" className="hidden" onChange={handlePhotoChange} />
           <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" disabled={photoProcessing} onClick={() => fileRef.current?.click()}>
+            <Button type="button" variant="outline" disabled={photoProcessing}
+              onClick={() => mainFileRef.current?.click()}>
               {photoProcessing ? 'Processing…' : '📷 Replace photo (optional)'}
             </Button>
             {newImageBase64 && (
@@ -225,7 +381,146 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           </div>
         </section>
 
-        {/* Identity fields */}
+        {/* ── Plant.id Re-identification ───────────────────────────────────── */}
+        <section className="border border-blue-100 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setIdentifyExpanded(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-sm font-medium text-blue-800 hover:bg-blue-100 transition-colors"
+          >
+            <span>🔍 Re-identify with Plant.id — auto-fill missing details</span>
+            <span className="text-blue-400 text-lg leading-none">{identifyExpanded ? '▲' : '▼'}</span>
+          </button>
+
+          {identifyExpanded && (
+            <div className="p-4 space-y-4 bg-white">
+              <p className="text-xs text-gray-500">
+                Upload a clear photo of this plant. Plant.id will suggest botanical name,
+                description, family, edible parts and watering needs. You choose whether to
+                apply only to empty fields or overwrite everything.
+              </p>
+
+              {/* Hidden file input for identification */}
+              <input
+                ref={identifyFileRef}
+                type="file"
+                accept="image/jpeg,image/png"
+                capture="environment"
+                className="hidden"
+                onChange={handleIdentifyPhoto}
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={identifying}
+                  onClick={() => identifyFileRef.current?.click()}
+                  className="text-xs"
+                >
+                  {identifying ? 'Identifying…' : '📷 Upload photo to identify'}
+                </Button>
+
+                {/* If a replacement photo is already loaded, offer to reuse it */}
+                {newImageBase64 && !identifying && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="text-xs text-blue-700 border-blue-300"
+                    onClick={async () => {
+                      setIdentifying(true)
+                      setIdentifySuggestion(null)
+                      try {
+                        await runIdentification(newImageBase64)
+                      } catch (err) {
+                        setServerError(`Plant.id failed: ${err instanceof Error ? err.message : 'Try again'}`)
+                        window.scrollTo({ top: 0, behavior: 'smooth' })
+                      } finally {
+                        setIdentifying(false)
+                      }
+                    }}
+                  >
+                    ↑ Use replacement photo above
+                  </Button>
+                )}
+              </div>
+
+              {/* Results panel */}
+              {identifySuggestion && (
+                <div className="space-y-3">
+                  {/* Confidence badge */}
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold
+                    ${identifySuggestion.confidence >= 70
+                      ? 'bg-green-100 text-green-800'
+                      : identifySuggestion.confidence >= 40
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-red-100 text-red-800'}`}>
+                    {identifySuggestion.confidence >= 70 ? '✓' : '⚠'}&nbsp;
+                    {identifySuggestion.confidence}% confident — {identifySuggestion.botanicalName}
+                  </div>
+
+                  {/* Suggestion diff table */}
+                  <div className="rounded-lg border border-gray-200 overflow-hidden text-xs">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left px-3 py-2 text-gray-500 font-medium w-32">Field</th>
+                          <th className="text-left px-3 py-2 text-gray-500 font-medium">Current value</th>
+                          <th className="text-left px-3 py-2 text-gray-500 font-medium">Plant.id suggests</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {([
+                          ['Botanical name', watch('botanical_name'), identifySuggestion.botanicalName],
+                          ['Description',    watch('description'),    identifySuggestion.description.slice(0, 80) + (identifySuggestion.description.length > 80 ? '…' : '')],
+                          ['Plant family',   watch('plant_family'),   identifySuggestion.plantFamily],
+                          ['Edible parts',   watch('edible_parts'),   identifySuggestion.edibleParts],
+                          ['Watering',       watch('watering_needs'), identifySuggestion.watering],
+                        ] as [string, string, string][]).map(([label, current, suggested]) => (
+                          <tr key={label} className={!current && suggested ? 'bg-green-50' : ''}>
+                            <td className="px-3 py-2 font-medium text-gray-600">{label}</td>
+                            <td className="px-3 py-2 text-gray-400 italic">
+                              {current || <span className="text-red-400">empty</span>}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">{suggested || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="px-3 py-2 text-[10px] text-gray-400 bg-gray-50">
+                      Rows highlighted green = currently empty, will be filled.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      className="text-xs"
+                      style={{ backgroundColor: '#2E7D32', color: 'white' }}
+                      onClick={() => applyIdentification(true)}
+                    >
+                      ✓ Fill empty fields only (safe)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="text-xs text-amber-700 border-amber-300"
+                      onClick={() => {
+                        if (window.confirm('This will overwrite ALL fields listed above, including ones you have already filled in. Continue?')) {
+                          applyIdentification(false)
+                        }
+                      }}
+                    >
+                      ⚠ Overwrite all fields
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ── Plant Identity ───────────────────────────────────────────────── */}
         <section className="space-y-4">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Plant Identity</h2>
 
@@ -286,7 +581,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           </div>
         </section>
 
-        {/* Details */}
+        {/* ── Details ─────────────────────────────────────────────────────── */}
         <section className="space-y-4">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Details</h2>
           <div className="grid grid-cols-2 gap-3">
@@ -308,7 +603,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           <Field label="Internal Notes"><Input {...register('notes')} /></Field>
         </section>
 
-        {/* N/A image categories */}
+        {/* ── N/A image categories ─────────────────────────────────────────── */}
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Image Categories (N/A)</h2>
           <div className="flex flex-wrap gap-3">
@@ -319,7 +614,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   defaultChecked={currentNAP.includes(part)}
                   onChange={e => {
                     const current = watch('not_applicable_parts') ?? ''
-                    const parts = current.split('|').filter(Boolean)
+                    const parts   = current.split('|').filter(Boolean)
                     const updated = e.target.checked
                       ? [...parts, part]
                       : parts.filter(p => p !== part)
@@ -332,52 +627,81 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           </div>
         </section>
 
-        {/* Sub-images from Wikimedia */}
+        {/* ── Sub-images ───────────────────────────────────────────────────── */}
         <section className="space-y-3">
           <div className="flex items-center justify-between border-b pb-2">
             <h2 className="text-base font-semibold text-gray-700">Sub-Images (Wikimedia Commons)</h2>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={fetchingSubImages}
-              onClick={handleFetchSubImages}
-              className="text-xs"
-            >
-              {fetchingSubImages ? 'Fetching…' : fetchedSubImages ? '🔄 Re-fetch' : '🌐 Fetch sub-images'}
-            </Button>
+            <div className="flex gap-2">
+              {/* Only show "Fetch missing" if there are empty categories */}
+              {emptyCats.length > 0 && (
+                <Button type="button" variant="outline" disabled={fetchingSubImages}
+                  onClick={() => handleFetchSubImages(false)} className="text-xs">
+                  {fetchingSubImages ? 'Fetching…' : `🌐 Fetch missing (${emptyCats.length})`}
+                </Button>
+              )}
+              {/* Always allow re-fetch all */}
+              {filledCats.length > 0 && (
+                <Button type="button" variant="outline" disabled={fetchingSubImages}
+                  onClick={() => handleFetchSubImages(true)} className="text-xs text-amber-700 border-amber-300">
+                  {fetchingSubImages ? '…' : '🔄 Re-fetch all'}
+                </Button>
+              )}
+              {/* First fetch — no existing images at all */}
+              {filledCats.length === 0 && emptyCats.length === 0 && (
+                <Button type="button" variant="outline" disabled={fetchingSubImages}
+                  onClick={() => handleFetchSubImages(false)} className="text-xs">
+                  {fetchingSubImages ? 'Fetching…' : '🌐 Fetch sub-images'}
+                </Button>
+              )}
+            </div>
           </div>
 
-          {/* Show already-saved sub-images if no new fetch yet */}
-          {!fetchedSubImages && hasExistingSubImages(species) && (
-            <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-              This plant already has sub-images saved. Click "Re-fetch" to replace them with fresh ones from Wikimedia.
+          {/* Status of existing DB images */}
+          {filledCats.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {(['flowers','fruits','leaves','bark','roots'] as const).map(cat => {
+                const isFilled = filledCats.includes(cat)
+                const hasFetched = fetchedSubImages && (fetchedSubImages[cat as keyof SubImages]?.length ?? 0) > 0
+                return (
+                  <span key={cat} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium
+                    ${hasFetched ? 'bg-blue-100 text-blue-700' : isFilled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                    {hasFetched ? '↑' : isFilled ? '✓' : '○'} {cat}
+                  </span>
+                )
+              })}
             </div>
           )}
-          {!fetchedSubImages && !hasExistingSubImages(species) && (
+
+          {!fetchedSubImages && filledCats.length === 0 && (
             <p className="text-xs text-gray-400">
-              No sub-images saved yet. Click "Fetch sub-images" to pull flower, fruit, leaf, bark and root photos from Wikimedia Commons (free, attribution included).
+              No sub-images saved yet. Click "Fetch missing" to pull flower, fruit, leaf,
+              bark and root photos from Wikimedia Commons (free, attribution included).
             </p>
           )}
 
+          {/* Newly fetched images preview */}
           {fetchedSubImages && (
             <div className="space-y-4">
               {(Object.entries(fetchedSubImages) as [string, { url: string; attribution: string }[]][]).map(([cat, imgs]) => (
                 <div key={cat}>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{cat}</p>
-                  {imgs.length === 0
-                    ? <p className="text-xs text-gray-400 italic">No images found for {cat}</p>
-                    : (
-                      <div className="flex gap-2 flex-wrap">
-                        {imgs.map(img => (
-                          <div key={img.url} className="space-y-0.5">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={img.url} alt={`${cat}`} className="h-24 w-32 object-cover rounded-lg border border-gray-100" />
-                            <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attribution}>{img.attribution}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  }
+                  {imgs.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">
+                      {filledCats.includes(cat) ? '✓ Existing image kept (not replaced)' : 'No images found'}
+                    </p>
+                  ) : (
+                    <div className="flex gap-2 flex-wrap">
+                      {imgs.map(img => (
+                        <div key={img.url} className="space-y-0.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.url} alt={cat}
+                            className="h-24 w-32 object-cover rounded-lg border border-gray-100" />
+                          <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
+                            title={img.attribution}>{img.attribution}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               <p className="text-xs text-amber-600">↑ These will be saved when you click Save Changes below.</p>
@@ -385,7 +709,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           )}
         </section>
 
-        {/* Tentative flag */}
+        {/* ── Tentative flag ───────────────────────────────────────────────── */}
         <div className="flex items-center gap-3">
           <input type="checkbox" id="tentative" {...register('tentative')} />
           <label htmlFor="tentative" className="text-sm text-gray-700">
@@ -394,7 +718,8 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
         </div>
 
         <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={saving || photoProcessing} style={{ backgroundColor: '#2E7D32', color: 'white' }}>
+          <Button type="submit" disabled={saving || photoProcessing}
+            style={{ backgroundColor: '#2E7D32', color: 'white' }}>
             {saving ? 'Saving…' : photoProcessing ? 'Processing photo…' : 'Save Changes'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
@@ -404,6 +729,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   )
 }
 
+// ── Field wrapper ────────────────────────────────────────────────────────────
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -414,6 +740,7 @@ function Field({ label, error, children }: { label: string; error?: string; chil
   )
 }
 
+// ── Char-count textarea ──────────────────────────────────────────────────────
 function CharCountTextarea({
   name, register, setValue, watch, max,
 }: {
