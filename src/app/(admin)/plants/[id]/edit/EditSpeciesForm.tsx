@@ -63,8 +63,10 @@ function compressToBase64(file: File): Promise<string> {
 
 // ── Sub-image helpers ────────────────────────────────────────────────────────
 
+type ManualEntry = { url: string; attr: string }
+
 // Only include categories that have actual new images — never null-out existing
-// DB values because Wikimedia found nothing for that category.
+// DB values because the automated fetch found nothing for that category.
 function buildSubImageFields(subImages: SubImages): Record<string, string | null> {
   const f: Record<string, string | null> = {}
   const map: [string, keyof SubImages][] = [
@@ -73,11 +75,33 @@ function buildSubImageFields(subImages: SubImages): Record<string, string | null
   ]
   for (const [prefix, key] of map) {
     const imgs = subImages[key]
-    if (imgs.length === 0) continue  // no new images — leave existing DB values intact
+    if (imgs.length === 0) continue
     f[`img_${prefix}_1_url`]  = imgs[0]?.url  ?? null
     f[`img_${prefix}_1_attr`] = imgs[0]?.attribution ?? null
     f[`img_${prefix}_2_url`]  = imgs[1]?.url  ?? null
     f[`img_${prefix}_2_attr`] = imgs[1]?.attribution ?? null
+  }
+  return f
+}
+
+// Manual URL fields → flat DB columns. Only applied for categories where
+// the automated fetch returned nothing (fetched wins if both exist).
+function buildManualImageFields(
+  manual: Record<string, ManualEntry>,
+  fetched: SubImages | null
+): Record<string, string | null> {
+  const f: Record<string, string | null> = {}
+  const catToPrefix: Record<string, string> = {
+    flowers: 'flower', fruits: 'fruit', leaves: 'leaf', bark: 'bark', roots: 'root',
+  }
+  for (const [cat, entry] of Object.entries(manual)) {
+    if (!entry.url.trim()) continue
+    // Skip if automated fetch already provided an image for this category
+    if (fetched && (fetched[cat as keyof SubImages]?.length ?? 0) > 0) continue
+    const prefix = catToPrefix[cat]
+    if (!prefix) continue
+    f[`img_${prefix}_1_url`]  = entry.url.trim()
+    f[`img_${prefix}_1_attr`] = entry.attr.trim() || null
   }
   return f
 }
@@ -142,6 +166,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   // Sub-images state
   const [fetchingSubImages, setFetchingSubImages] = useState(false)
   const [fetchedSubImages, setFetchedSubImages]   = useState<SubImages | null>(null)
+  const [manualImages, setManualImages]           = useState<Record<string, ManualEntry>>({})
 
   // Plant.id identification state
   const [identifying, setIdentifying]             = useState(false)
@@ -316,7 +341,11 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
     setSaving(true)
     try {
-      const imageFields = fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}
+      const imageFields = {
+        // Manual first (lower priority) — fetched/automated overrides where it has images
+        ...buildManualImageFields(manualImages, fetchedSubImages),
+        ...(fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}),
+      }
       const res = await fetch(`/api/plants/${species.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -734,11 +763,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
               {(Object.entries(fetchedSubImages) as [string, { url: string; attribution: string }[]][]).map(([cat, imgs]) => (
                 <div key={cat}>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{cat}</p>
-                  {imgs.length === 0 ? (
-                    <p className="text-xs text-gray-400 italic">
-                      {filledCategories(species).includes(cat) ? '✓ Existing image kept (not replaced)' : 'No images found'}
-                    </p>
-                  ) : (
+                  {imgs.length > 0 ? (
                     <div className="flex gap-2 flex-wrap">
                       {imgs.map(img => (
                         <div key={img.url} className="space-y-0.5">
@@ -749,6 +774,44 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                             title={img.attribution}>{img.attribution}</p>
                         </div>
                       ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-gray-400 italic">
+                        {filledCategories(species).includes(cat)
+                          ? '✓ Existing image kept'
+                          : 'No images found automatically — paste a URL below'}
+                      </p>
+                      {/* Manual URL fallback for this category */}
+                      <div className="flex flex-col gap-1 max-w-sm">
+                        <input
+                          type="url"
+                          placeholder="Paste image URL (https://…)"
+                          value={manualImages[cat]?.url ?? ''}
+                          onChange={e => setManualImages(m => ({
+                            ...m, [cat]: { ...(m[cat] ?? { attr: '' }), url: e.target.value }
+                          }))}
+                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Attribution (e.g. © Author, CC BY, via Source)"
+                          value={manualImages[cat]?.attr ?? ''}
+                          onChange={e => setManualImages(m => ({
+                            ...m, [cat]: { ...(m[cat] ?? { url: '' }), attr: e.target.value }
+                          }))}
+                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600"
+                        />
+                        {manualImages[cat]?.url && (
+                          // Live preview of pasted URL
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={manualImages[cat].url} alt={cat}
+                            className="h-20 w-28 object-cover rounded-lg border border-green-200 mt-1"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                            onLoad={e  => { (e.target as HTMLImageElement).style.display = 'block' }}
+                          />
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
