@@ -10,6 +10,7 @@ import { getAllSpecies, softDeleteSpecies, restoreSpecies } from '@/lib/queries'
 import { formatDateTime } from '@/lib/formatters'
 import { Badge } from '@/components/ui/badge'
 import { revalidatePath } from 'next/cache'
+import { PlantSearchInput } from '@/components/PlantSearchInput'
 import type { PlantSpecies } from '@/types'
 
 type SortField = 'plant_id' | 'common_name' | 'category' | 'updated_at'
@@ -66,17 +67,8 @@ export default async function PlantsPage({
         </Link>
       </div>
 
-      {/* Search — preserves sort state across searches */}
-      <form method="GET">
-        <input type="hidden" name="sort" value={sortField} />
-        <input type="hidden" name="dir"  value={sortDir} />
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="Search by common name…"
-          className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
-        />
-      </form>
+      {/* Search — client-side debounce, triggers at 4+ chars, no Enter needed */}
+      <PlantSearchInput defaultValue={q} sort={sortField} dir={sortDir} />
 
       <p className="text-sm text-gray-500">{filtered.length} species found</p>
 

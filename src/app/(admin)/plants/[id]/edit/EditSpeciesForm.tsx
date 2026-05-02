@@ -14,6 +14,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
 import type { PlantSpecies } from '@/types'
+import type { SubImages } from '@/components/ImageUploader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +46,28 @@ function compressToBase64(file: File): Promise<string> {
   })
 }
 
+// Flatten SubImages into the flat DB column structure expected by the PATCH route.
+function buildSubImageFields(subImages: SubImages): Record<string, string | null> {
+  const f: Record<string, string | null> = {}
+  const map: [string, keyof SubImages][] = [
+    ['flower', 'flowers'], ['fruit', 'fruits'],
+    ['leaf', 'leaves'],    ['bark', 'bark'], ['root', 'roots'],
+  ]
+  for (const [prefix, key] of map) {
+    const imgs = subImages[key]
+    f[`img_${prefix}_1_url`]  = imgs[0]?.url ?? null
+    f[`img_${prefix}_1_attr`] = imgs[0]?.attribution ?? null
+    f[`img_${prefix}_2_url`]  = imgs[1]?.url ?? null
+    f[`img_${prefix}_2_attr`] = imgs[1]?.attribution ?? null
+  }
+  return f
+}
+
+// Returns true if the species already has at least one sub-image saved.
+function hasExistingSubImages(s: PlantSpecies): boolean {
+  return !!(s.img_flower_1_url || s.img_fruit_1_url || s.img_leaf_1_url || s.img_bark_1_url || s.img_root_1_url)
+}
+
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const
@@ -57,6 +80,8 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   const [newImageBase64, setNewImageBase64] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl]     = useState<string | null>(species.img_main_url)
   const [serverError, setServerError]   = useState<string | null>(null)
+  const [fetchingSubImages, setFetchingSubImages] = useState(false)
+  const [fetchedSubImages, setFetchedSubImages]   = useState<SubImages | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
@@ -108,17 +133,44 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
+  async function handleFetchSubImages() {
+    const name = species.botanical_name || species.common_name
+    const confirmed = window.confirm(
+      `Fetch open-source sub-images for "${species.common_name}" from Wikimedia Commons?\n\n` +
+      `This is free (no API key) but uses a network call. Only do this once per plant.`
+    )
+    if (!confirmed) return
+    setFetchingSubImages(true)
+    try {
+      const res = await fetch(`/api/fetch-images?name=${encodeURIComponent(name)}`)
+      if (!res.ok) throw new Error('Wikimedia fetch failed')
+      const data = await res.json() as SubImages
+      setFetchedSubImages(data)
+      const total = Object.values(data).flat().length
+      if (total === 0) {
+        toast.warning('No images found on Wikimedia for this plant. Try saving with the botanical name filled in.')
+      } else {
+        toast.success(`${total} sub-images fetched — review below, then click Save Changes`)
+      }
+    } catch (err) {
+      setServerError(`Sub-image fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } finally {
+      setFetchingSubImages(false)
+    }
+  }
+
   async function onSubmit(data: PlantSpeciesFormData) {
-    // Guard: if no existing image and no new image selected, warn but allow save
     if (!species.img_main_url && !newImageBase64) {
       toast.warning('Saving without a photo — use "Replace photo" to add one before saving')
     }
     setSaving(true)
     try {
+      const imageFields = fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}
       const res = await fetch(`/api/plants/${species.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, imageBase64: newImageBase64 }),
+        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields }),
       })
       if (!res.ok) {
         const err = await res.json() as { error: string }
@@ -278,6 +330,59 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
               </label>
             ))}
           </div>
+        </section>
+
+        {/* Sub-images from Wikimedia */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between border-b pb-2">
+            <h2 className="text-base font-semibold text-gray-700">Sub-Images (Wikimedia Commons)</h2>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={fetchingSubImages}
+              onClick={handleFetchSubImages}
+              className="text-xs"
+            >
+              {fetchingSubImages ? 'Fetching…' : fetchedSubImages ? '🔄 Re-fetch' : '🌐 Fetch sub-images'}
+            </Button>
+          </div>
+
+          {/* Show already-saved sub-images if no new fetch yet */}
+          {!fetchedSubImages && hasExistingSubImages(species) && (
+            <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+              This plant already has sub-images saved. Click "Re-fetch" to replace them with fresh ones from Wikimedia.
+            </div>
+          )}
+          {!fetchedSubImages && !hasExistingSubImages(species) && (
+            <p className="text-xs text-gray-400">
+              No sub-images saved yet. Click "Fetch sub-images" to pull flower, fruit, leaf, bark and root photos from Wikimedia Commons (free, attribution included).
+            </p>
+          )}
+
+          {fetchedSubImages && (
+            <div className="space-y-4">
+              {(Object.entries(fetchedSubImages) as [string, { url: string; attribution: string }[]][]).map(([cat, imgs]) => (
+                <div key={cat}>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{cat}</p>
+                  {imgs.length === 0
+                    ? <p className="text-xs text-gray-400 italic">No images found for {cat}</p>
+                    : (
+                      <div className="flex gap-2 flex-wrap">
+                        {imgs.map(img => (
+                          <div key={img.url} className="space-y-0.5">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={img.url} alt={`${cat}`} className="h-24 w-32 object-cover rounded-lg border border-gray-100" />
+                            <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attribution}>{img.attribution}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  }
+                </div>
+              ))}
+              <p className="text-xs text-amber-600">↑ These will be saved when you click Save Changes below.</p>
+            </div>
+          )}
         </section>
 
         {/* Tentative flag */}
