@@ -181,6 +181,16 @@ async function fetchFromINaturalist(
     }
   }
 
+  // Tag every attribution with a detectable marker when the images came from a
+  // genus-level fallback (not the exact species). This marker persists in the DB
+  // so both the admin saved-images view and the public gallery can surface a
+  // "may be a related subspecies" disclaimer without a schema change.
+  if (foundLevel === 'genus') {
+    for (const r of results) {
+      r.attribution = `${r.attribution} · genus match`
+    }
+  }
+
   return { images: results, level: foundLevel, query: foundQuery }
 }
 

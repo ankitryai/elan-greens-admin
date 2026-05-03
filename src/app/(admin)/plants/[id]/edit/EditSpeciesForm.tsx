@@ -795,6 +795,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
             const slot1Deleted = deletedSaved.has(`${cat}_1`)
             const slot2Deleted = deletedSaved.has(`${cat}_2`)
             const hasSaved = (!!savedUrl1 && !slot1Deleted) || (!!savedUrl2 && !slot2Deleted)
+            // Does any saved slot carry a genus-match marker from a previous fetch?
+            const savedHasGenusMatch =
+              savedAttr1?.includes('· genus match') || savedAttr2?.includes('· genus match')
 
             // What a fresh fetch found this session
             const fetchedImgs = fetchedSubImages?.[cat as keyof SubImages] ?? []
@@ -807,6 +810,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                     {cat}
                     {hasFetched && <span className="ml-2 text-blue-600 font-normal normal-case">↑ new fetch — will replace on save</span>}
                     {!hasFetched && hasSaved && <span className="ml-2 text-green-600 font-normal normal-case">✓ saved</span>}
+                    {!hasFetched && hasSaved && savedHasGenusMatch && (
+                      <span className="ml-1.5 text-[9px] font-semibold bg-amber-500 text-white px-1.5 py-0.5 rounded leading-none align-middle">* genus</span>
+                    )}
                     {!hasFetched && !hasSaved && (slot1Deleted || slot2Deleted) && (
                       <span className="ml-2 text-red-500 font-normal normal-case">🗑 will be deleted on save</span>
                     )}
@@ -837,12 +843,14 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                       <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                         <span className="text-amber-500 text-sm mt-0.5 shrink-0">⚠</span>
                         <div className="text-[11px] text-amber-800 space-y-0.5">
-                          <p className="font-semibold">Possible subspecies mismatch</p>
+                          <p className="font-semibold">Genus-level match only — possible subspecies mismatch</p>
                           <p>
-                            No iNaturalist observations found for <em>{speciesName}</em> (species level).
-                            These images are from the broader genus <strong>&ldquo;{d.query}&rdquo;</strong>{' '}
-                            and may show a related but distinct species. Review carefully — reject any
-                            that don&apos;t match this plant.
+                            No species-level results found for <em>{speciesName}</em>.
+                            These images are from the broader genus <strong>&ldquo;{d.query}&rdquo;</strong> and
+                            may depict a related but distinct species (e.g. a sibling species that shares
+                            the genus name but looks different). Each image is tagged{' '}
+                            <span className="font-mono bg-amber-100 px-1 rounded">* genus</span> below.
+                            Reject any that don&apos;t match this plant before saving.
                           </p>
                         </div>
                       </div>
@@ -864,7 +872,8 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                       { url: savedUrl1, attr: savedAttr1, slot: 1 as const },
                       { url: savedUrl2, attr: savedAttr2, slot: 2 as const },
                     ] as const).filter(i => i.url).map(img => {
-                      const isDeleted = deletedSaved.has(`${cat}_${img.slot}`)
+                      const isDeleted    = deletedSaved.has(`${cat}_${img.slot}`)
+                      const isGenusMatch = img.attr?.includes('· genus match') ?? false
                       return (
                         <div key={img.slot} className="space-y-0.5">
                           <div className="relative group">
@@ -877,6 +886,13 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                                   ? 'opacity-30 border-red-300'
                                   : 'border-green-200'}`}
                             />
+                            {/* * genus badge on saved genus-level images */}
+                            {isGenusMatch && !isDeleted && (
+                              <span className="absolute bottom-1 left-1 text-[9px] font-semibold
+                                               bg-amber-500 text-white px-1.5 py-0.5 rounded leading-none">
+                                * genus
+                              </span>
+                            )}
                             {/* Delete overlay + button when NOT yet deleted */}
                             {!isDeleted && (
                               <button
@@ -907,8 +923,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                             )}
                           </div>
                           {img.attr && !isDeleted && (
-                            <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attr}>
-                              {img.attr}
+                            <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
+                              title={img.attr}>
+                              {img.attr.replace(' · genus match', '')}
                             </p>
                           )}
                         </div>
@@ -920,26 +937,38 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                 {/* Newly fetched images (will replace saved on save) — each has a × reject button */}
                 {hasFetched && (
                   <div className="flex gap-2 flex-wrap">
-                    {fetchedImgs.map(img => (
-                      <div key={img.url} className="space-y-0.5 relative group">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={img.url} alt={cat}
-                          className="h-24 w-32 object-cover rounded-lg border border-blue-200" />
-                        {/* × reject this image */}
-                        <button
-                          type="button"
-                          onClick={() => rejectFetchedImage(cat as keyof SubImages, img.url)}
-                          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center
-                                     bg-red-500 text-white rounded-full text-[11px] leading-none
-                                     opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                          title="Reject this image"
-                        >
-                          ×
-                        </button>
-                        <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
-                          title={img.attribution}>{img.attribution}</p>
-                      </div>
-                    ))}
+                    {fetchedImgs.map(img => {
+                      const isGenusMatch = img.attribution.includes('· genus match')
+                      return (
+                        <div key={img.url} className="space-y-0.5 relative group">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.url} alt={cat}
+                            className="h-24 w-32 object-cover rounded-lg border border-blue-200" />
+                          {/* × reject this image */}
+                          <button
+                            type="button"
+                            onClick={() => rejectFetchedImage(cat as keyof SubImages, img.url)}
+                            className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center
+                                       bg-red-500 text-white rounded-full text-[11px] leading-none
+                                       opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                            title="Reject this image"
+                          >
+                            ×
+                          </button>
+                          {/* * genus badge — shown when image is from a genus-level fallback */}
+                          {isGenusMatch && (
+                            <span className="absolute bottom-1 left-1 text-[9px] font-semibold
+                                             bg-amber-500 text-white px-1.5 py-0.5 rounded leading-none">
+                              * genus
+                            </span>
+                          )}
+                          <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
+                            title={img.attribution}>
+                            {img.attribution.replace(' · genus match', '')}
+                          </p>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
 
