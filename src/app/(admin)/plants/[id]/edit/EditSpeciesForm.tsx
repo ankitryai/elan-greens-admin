@@ -169,6 +169,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   const [fetchedSubImages, setFetchedSubImages]   = useState<SubImages | null>(null)
   const [fetchDebug, setFetchDebug]               = useState<Record<string, FetchDebug> | null>(null)
   const [manualImages, setManualImages]           = useState<Record<string, ManualEntry>>({})
+  // Tracks saved DB image slots the admin has marked for deletion.
+  // Key format: "<category>_<slot>" e.g. "bark_1", "roots_2"
+  const [deletedSaved, setDeletedSaved]           = useState<Set<string>>(new Set())
 
   // Plant.id identification state
   const [identifying, setIdentifying]             = useState(false)
@@ -339,6 +342,14 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
+  // ── Delete / restore saved DB images ─────────────────────────────────────
+  function deleteSavedImage(cat: string, slot: 1 | 2) {
+    setDeletedSaved(prev => new Set([...prev, `${cat}_${slot}`]))
+  }
+  function restoreSavedImage(cat: string, slot: 1 | 2) {
+    setDeletedSaved(prev => { const n = new Set(prev); n.delete(`${cat}_${slot}`); return n })
+  }
+
   // ── Reject individual fetched images (or whole category) ──────────────────
   function rejectFetchedImage(cat: keyof SubImages, url: string) {
     setFetchedSubImages(prev => {
@@ -361,10 +372,26 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
     setSaving(true)
     try {
+      // Build explicit nulls for every saved slot the admin has marked deleted.
+      // A fresh fetch for the same category overrides these (appears later in spread).
+      const catToPrefix: Record<string, string> = {
+        flowers: 'flower', fruits: 'fruit', leaves: 'leaf', bark: 'bark', roots: 'root',
+      }
+      const deletedFields: Record<string, null> = {}
+      for (const key of deletedSaved) {
+        const under  = key.lastIndexOf('_')
+        const cat    = key.slice(0, under)
+        const slot   = key.slice(under + 1)          // "1" or "2"
+        const prefix = catToPrefix[cat]
+        if (!prefix) continue
+        deletedFields[`img_${prefix}_${slot}_url`]  = null
+        deletedFields[`img_${prefix}_${slot}_attr`] = null
+      }
+
       const imageFields = {
-        // Manual first (lower priority) — fetched/automated overrides where it has images
-        ...buildManualImageFields(manualImages, fetchedSubImages),
-        ...(fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}),
+        ...deletedFields,                                                    // nulls lowest priority
+        ...buildManualImageFields(manualImages, fetchedSubImages),           // manual next
+        ...(fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}),  // fresh fetch wins
       }
       const res = await fetch(`/api/plants/${species.id}`, {
         method: 'PATCH',
@@ -764,7 +791,10 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
             const savedAttr1 = sp[`img_${prefix}_1_attr`]
             const savedUrl2  = sp[`img_${prefix}_2_url`]
             const savedAttr2 = sp[`img_${prefix}_2_attr`]
-            const hasSaved   = !!(savedUrl1 || savedUrl2)
+            // hasSaved considers only slots NOT marked for deletion
+            const slot1Deleted = deletedSaved.has(`${cat}_1`)
+            const slot2Deleted = deletedSaved.has(`${cat}_2`)
+            const hasSaved = (!!savedUrl1 && !slot1Deleted) || (!!savedUrl2 && !slot2Deleted)
 
             // What a fresh fetch found this session
             const fetchedImgs = fetchedSubImages?.[cat as keyof SubImages] ?? []
@@ -777,6 +807,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                     {cat}
                     {hasFetched && <span className="ml-2 text-blue-600 font-normal normal-case">↑ new fetch — will replace on save</span>}
                     {!hasFetched && hasSaved && <span className="ml-2 text-green-600 font-normal normal-case">✓ saved</span>}
+                    {!hasFetched && !hasSaved && (slot1Deleted || slot2Deleted) && (
+                      <span className="ml-2 text-red-500 font-normal normal-case">🗑 will be deleted on save</span>
+                    )}
                   </p>
                   {/* Reject-all button — only when there are fetched images */}
                   {hasFetched && (
@@ -824,23 +857,63 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   )
                 })()}
 
-                {/* Currently saved DB images */}
-                {hasSaved && !hasFetched && (
+                {/* Currently saved DB images — shown whenever a slot exists, with delete/undo controls */}
+                {(!!savedUrl1 || !!savedUrl2) && !hasFetched && (
                   <div className="flex gap-2 flex-wrap">
-                    {[{url: savedUrl1, attr: savedAttr1}, {url: savedUrl2, attr: savedAttr2}]
-                      .filter(i => i.url)
-                      .map((img, idx) => (
-                        <div key={idx} className="space-y-0.5">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={img.url!} alt={cat}
-                            className="h-24 w-32 object-cover rounded-lg border border-green-200" />
-                          {img.attr && (
+                    {([
+                      { url: savedUrl1, attr: savedAttr1, slot: 1 as const },
+                      { url: savedUrl2, attr: savedAttr2, slot: 2 as const },
+                    ] as const).filter(i => i.url).map(img => {
+                      const isDeleted = deletedSaved.has(`${cat}_${img.slot}`)
+                      return (
+                        <div key={img.slot} className="space-y-0.5">
+                          <div className="relative group">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={img.url!}
+                              alt={cat}
+                              className={`h-24 w-32 object-cover rounded-lg border transition-opacity
+                                ${isDeleted
+                                  ? 'opacity-30 border-red-300'
+                                  : 'border-green-200'}`}
+                            />
+                            {/* Delete overlay + button when NOT yet deleted */}
+                            {!isDeleted && (
+                              <button
+                                type="button"
+                                onClick={() => deleteSavedImage(cat, img.slot)}
+                                className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center
+                                           bg-red-500 text-white rounded-full text-[11px] leading-none
+                                           opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                                title="Delete this saved image"
+                              >
+                                🗑
+                              </button>
+                            )}
+                            {/* "Will be deleted" banner + undo when marked deleted */}
+                            {isDeleted && (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-red-50/60">
+                                <p className="text-[9px] font-semibold text-red-600 text-center leading-tight px-1">
+                                  Will be<br />deleted
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => restoreSavedImage(cat, img.slot)}
+                                  className="mt-1 text-[9px] text-blue-600 underline"
+                                >
+                                  Undo
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          {img.attr && !isDeleted && (
                             <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attr}>
                               {img.attr}
                             </p>
                           )}
                         </div>
-                      ))}
+                      )
+                    })}
                   </div>
                 )}
 
