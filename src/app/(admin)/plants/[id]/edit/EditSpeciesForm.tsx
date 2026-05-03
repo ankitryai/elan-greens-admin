@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
+import type { FetchDebug } from '@/app/api/fetch-images/route'
 
 const PLANT_ID_LIMIT = 100
 
@@ -166,6 +167,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   // Sub-images state
   const [fetchingSubImages, setFetchingSubImages] = useState(false)
   const [fetchedSubImages, setFetchedSubImages]   = useState<SubImages | null>(null)
+  const [fetchDebug, setFetchDebug]               = useState<Record<string, FetchDebug> | null>(null)
   const [manualImages, setManualImages]           = useState<Record<string, ManualEntry>>({})
 
   // Plant.id identification state
@@ -318,8 +320,11 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     try {
       const res = await fetch(`/api/fetch-images?${params}`)
       if (!res.ok) throw new Error('Wikimedia fetch failed')
-      const data = await res.json() as SubImages
+      const raw = await res.json() as SubImages & { _debug?: Record<string, FetchDebug> }
+      const { _debug, ...images } = raw
+      const data = images as SubImages
       setFetchedSubImages(data)
+      if (_debug) setFetchDebug(_debug)
       const total = Object.values(data).flat().length
       if (total === 0) {
         toast.warning('No images found on Wikimedia for this plant. Wikimedia coverage varies — try again later or add images manually.')
@@ -332,6 +337,21 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     } finally {
       setFetchingSubImages(false)
     }
+  }
+
+  // ── Reject individual fetched images (or whole category) ──────────────────
+  function rejectFetchedImage(cat: keyof SubImages, url: string) {
+    setFetchedSubImages(prev => {
+      if (!prev) return prev
+      const updated = { ...prev, [cat]: prev[cat].filter(img => img.url !== url) }
+      return updated
+    })
+  }
+  function rejectAllFetched(cat: keyof SubImages) {
+    setFetchedSubImages(prev => {
+      if (!prev) return prev
+      return { ...prev, [cat]: [] }
+    })
   }
 
   // ── Save ───────────────────────────────────────────────────────────────────
@@ -752,11 +772,37 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
 
             return (
               <div key={cat} className="space-y-2">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  {cat}
-                  {hasFetched && <span className="ml-2 text-blue-600 font-normal normal-case">↑ new fetch — will replace on save</span>}
-                  {!hasFetched && hasSaved && <span className="ml-2 text-green-600 font-normal normal-case">✓ saved</span>}
-                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {cat}
+                    {hasFetched && <span className="ml-2 text-blue-600 font-normal normal-case">↑ new fetch — will replace on save</span>}
+                    {!hasFetched && hasSaved && <span className="ml-2 text-green-600 font-normal normal-case">✓ saved</span>}
+                  </p>
+                  {/* Reject-all button — only when there are fetched images */}
+                  {hasFetched && (
+                    <button
+                      type="button"
+                      onClick={() => rejectAllFetched(cat as keyof SubImages)}
+                      className="text-[10px] text-red-500 hover:text-red-700 border border-red-200 rounded px-1.5 py-0.5 leading-none"
+                    >
+                      ✕ Reject all fetched
+                    </button>
+                  )}
+                </div>
+
+                {/* Debug provenance line — shown for fetched categories */}
+                {hasFetched && fetchDebug?.[cat] && (() => {
+                  const d = fetchDebug[cat]
+                  const src = d.source === 'wikimedia' ? 'Wikimedia Commons'
+                    : d.source === 'inaturalist' ? 'iNaturalist'
+                    : '—'
+                  const lvl = d.level === 'genus' ? ` (genus-level — species returned 0)` : ''
+                  return (
+                    <p className="text-[10px] text-gray-400 italic">
+                      Source: {src} · Query: &ldquo;{d.query}&rdquo;{lvl}
+                    </p>
+                  )
+                })()}
 
                 {/* Currently saved DB images */}
                 {hasSaved && !hasFetched && (
@@ -778,14 +824,25 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   </div>
                 )}
 
-                {/* Newly fetched images (will replace saved on save) */}
+                {/* Newly fetched images (will replace saved on save) — each has a × reject button */}
                 {hasFetched && (
                   <div className="flex gap-2 flex-wrap">
                     {fetchedImgs.map(img => (
-                      <div key={img.url} className="space-y-0.5">
+                      <div key={img.url} className="space-y-0.5 relative group">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={img.url} alt={cat}
                           className="h-24 w-32 object-cover rounded-lg border border-blue-200" />
+                        {/* × reject this image */}
+                        <button
+                          type="button"
+                          onClick={() => rejectFetchedImage(cat as keyof SubImages, img.url)}
+                          className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center
+                                     bg-red-500 text-white rounded-full text-[11px] leading-none
+                                     opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                          title="Reject this image"
+                        >
+                          ×
+                        </button>
                         <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
                           title={img.attribution}>{img.attribution}</p>
                       </div>
