@@ -790,16 +790,36 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   )}
                 </div>
 
-                {/* Debug provenance line — shown for fetched categories */}
+                {/* Debug provenance — prominent warning for genus-level fallback, quiet label otherwise */}
                 {hasFetched && fetchDebug?.[cat] && (() => {
-                  const d = fetchDebug[cat]
-                  const src = d.source === 'wikimedia' ? 'Wikimedia Commons'
-                    : d.source === 'inaturalist' ? 'iNaturalist'
-                    : '—'
-                  const lvl = d.level === 'genus' ? ` (genus-level — species returned 0)` : ''
+                  const d        = fetchDebug[cat]
+                  const isGenus  = d.source === 'inaturalist' && d.level === 'genus'
+                  const srcLabel = d.source === 'wikimedia'    ? 'Wikimedia Commons'
+                                 : d.source === 'inaturalist'  ? 'iNaturalist'
+                                 : '—'
+
+                  if (isGenus) {
+                    const speciesName = watch('botanical_name')?.trim() || 'this species'
+                    return (
+                      <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <span className="text-amber-500 text-sm mt-0.5 shrink-0">⚠</span>
+                        <div className="text-[11px] text-amber-800 space-y-0.5">
+                          <p className="font-semibold">Possible subspecies mismatch</p>
+                          <p>
+                            No iNaturalist observations found for <em>{speciesName}</em> (species level).
+                            These images are from the broader genus <strong>&ldquo;{d.query}&rdquo;</strong>{' '}
+                            and may show a related but distinct species. Review carefully — reject any
+                            that don&apos;t match this plant.
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Normal case — quiet source line
                   return (
                     <p className="text-[10px] text-gray-400 italic">
-                      Source: {src} · Query: &ldquo;{d.query}&rdquo;{lvl}
+                      Source: {srcLabel} · Query: &ldquo;{d.query}&rdquo;
                     </p>
                   )
                 })()}
