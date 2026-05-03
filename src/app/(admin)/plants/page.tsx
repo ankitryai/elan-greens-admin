@@ -165,6 +165,11 @@ function SpeciesRow({
         {species.botanical_name && (
           <span className="block text-xs text-gray-400 italic">{species.botanical_name}</span>
         )}
+        {species.genus && (
+          <span className="inline-block mt-0.5 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-mono">
+            {species.genus}
+          </span>
+        )}
       </td>
 
       {/* Category */}

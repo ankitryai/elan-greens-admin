@@ -29,6 +29,7 @@ export interface PlantSpecies {
   description: string | null
   medicinal_properties: string | null
   plant_family: string | null
+  genus: string | null
   toxicity: string | null
   edible_parts: string | null
   native_region: string | null
@@ -94,7 +95,7 @@ export interface PlantIdSuggestion {
   plant_details: {
     common_names: string[] | null
     wiki_description?: { value: string } | null
-    taxonomy?: { family: string } | null
+    taxonomy?: { family: string; genus?: string } | null
     edible_parts?: string[] | null
     watering?: { min: number; max: number } | null
   }

@@ -17,7 +17,7 @@
 //    - "Overwrite all" replaces everything (explicit override).
 // =============================================================================
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -126,6 +126,7 @@ interface IdentifySuggestion {
   confidence:    number   // 0–100 percentage
   description:   string
   plantFamily:   string
+  genus:         string
   edibleParts:   string
   watering:      string
 }
@@ -146,6 +147,7 @@ function extractSuggestion(result: PlantIdResult): IdentifySuggestion | null {
     confidence:    Math.round((top.probability ?? 0) * 100),
     description:   d.wiki_description?.value ?? '',
     plantFamily:   d.taxonomy?.family ?? '',
+    genus:         d.taxonomy?.genus  ?? '',
     edibleParts:   d.edible_parts?.join(', ') ?? '',
     watering,
   }
@@ -198,6 +200,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
       description:           species.description           ?? '',
       medicinal_properties:  species.medicinal_properties  ?? '',
       plant_family:          species.plant_family          ?? '',
+      genus:                 species.genus                 ?? '',
       toxicity:              species.toxicity              ?? '',
       edible_parts:          species.edible_parts          ?? '',
       native_region:         species.native_region         ?? '',
@@ -210,6 +213,19 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
       notes:                 species.notes                 ?? '',
     },
   })
+
+  // ── Auto-fill genus from the first word of botanical name ─────────────────
+  // Only fires when botanical_name changes and genus is currently empty,
+  // so manual entries and Plant.id values are never silently overwritten.
+  const watchedBotanical = watch('botanical_name')
+  const watchedGenus     = watch('genus')
+  useEffect(() => {
+    const botanical = (watchedBotanical ?? '').trim()
+    if (!botanical) return
+    if ((watchedGenus ?? '').trim()) return
+    const derived = botanical.split(/\s+/)[0].replace(/^[×xX]/i, '').trim()
+    if (derived.length > 1) setValue('genus', derived)
+  }, [watchedBotanical]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Main photo replacement ─────────────────────────────────────────────────
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -287,6 +303,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     set('botanical_name',  s.botanicalName)
     set('description',     s.description.slice(0, 500))
     set('plant_family',    s.plantFamily)
+    set('genus',           s.genus)
     set('edible_parts',    s.edibleParts)
     set('watering_needs',  s.watering)
 
@@ -596,8 +613,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                           <tbody className="divide-y divide-gray-100">
                             {([
                               ['Botanical name', watch('botanical_name'), identifySuggestion.botanicalName],
-                              ['Description',    watch('description'),    identifySuggestion.description.slice(0, 80) + (identifySuggestion.description.length > 80 ? '…' : '')],
+                              ['Genus',          watch('genus'),          identifySuggestion.genus],
                               ['Plant family',   watch('plant_family'),   identifySuggestion.plantFamily],
+                              ['Description',    watch('description'),    identifySuggestion.description.slice(0, 80) + (identifySuggestion.description.length > 80 ? '…' : '')],
                               ['Edible parts',   watch('edible_parts'),   identifySuggestion.edibleParts],
                               ['Watering',       watch('watering_needs'), identifySuggestion.watering],
                             ] as [string, string, string][]).map(([label, current, suggested]) => (
@@ -730,6 +748,9 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Details</h2>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Plant Family"><Input {...register('plant_family')} /></Field>
+            <Field label="Genus">
+              <Input {...register('genus')} placeholder="auto-filled from botanical name" />
+            </Field>
             <Field label="Toxicity"><Input {...register('toxicity')} /></Field>
             <Field label="Edible Parts"><Input {...register('edible_parts')} /></Field>
             <Field label="Native Region"><Input {...register('native_region')} /></Field>

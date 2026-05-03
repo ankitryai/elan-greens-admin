@@ -7,7 +7,7 @@
 // from Plant.id results. Save action calls a Server Action via fetch.
 // =============================================================================
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -39,12 +39,25 @@ export default function AddSpeciesPage() {
     defaultValues: { tentative: true },
   })
 
+  // Auto-fill genus from the first word of botanical name when genus is empty
+  const watchedBotanical = watch('botanical_name')
+  const watchedGenus     = watch('genus')
+  useEffect(() => {
+    const botanical = (watchedBotanical ?? '').trim()
+    if (!botanical) return
+    if ((watchedGenus ?? '').trim()) return  // admin already typed something — don't override
+    // Strip hybrid prefix ×/x before taking first word
+    const derived = botanical.split(/\s+/)[0].replace(/^[×xX]/i, '').trim()
+    if (derived.length > 1) setValue('genus', derived)
+  }, [watchedBotanical]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Called by ImageUploader after identification — pre-fills form fields.
   function handleIdentified(result: IdentificationResult) {
     setAiConfidence(result.confidence)
     if (result.commonName)    setValue('common_name', result.commonName)
     if (result.botanicalName) setValue('botanical_name', result.botanicalName)
     if (result.family)        setValue('plant_family', result.family)
+    if (result.genus)         setValue('genus', result.genus)   // Plant.id taxonomy — most accurate
     if (result.edibleParts)   setValue('edible_parts', result.edibleParts)
     if (result.description)   setValue('description', result.description)
     setValue('tentative', true)  // AI-filled data always starts tentative
@@ -212,7 +225,10 @@ export default function AddSpeciesPage() {
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">3. Details (auto-filled from Plant.id)</h2>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Plant Family"><Input {...register('plant_family')} placeholder="e.g. Meliaceae" /></Field>
+            <Field label="Plant Family"><Input {...register('plant_family')} placeholder="e.g. Acanthaceae" /></Field>
+            <Field label="Genus">
+              <Input {...register('genus')} placeholder="e.g. Pseuderanthemum (auto-filled)" />
+            </Field>
             <Field label="Toxicity"><Input {...register('toxicity')} placeholder="e.g. Non-toxic" /></Field>
             <Field label="Edible Parts"><Input {...register('edible_parts')} placeholder="e.g. Leaves, fruit" /></Field>
             <Field label="Native Region"><Input {...register('native_region')} placeholder="e.g. South Asia" /></Field>

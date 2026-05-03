@@ -29,6 +29,7 @@ export interface IdentificationResult {
   commonName?: string
   botanicalName?: string
   family?: string
+  genus?: string
   edibleParts?: string
   description?: string
 }
@@ -307,6 +308,7 @@ function buildResult(top: PlantIdSuggestion, confidence: number): Identification
     commonName:    top.plant_details?.common_names?.[0] ?? undefined,
     botanicalName: top.plant_name ?? undefined,
     family:        top.plant_details?.taxonomy?.family ?? undefined,
+    genus:         top.plant_details?.taxonomy?.genus ?? undefined,
     edibleParts:   top.plant_details?.edible_parts?.join(', ') ?? undefined,
     description:   top.plant_details?.wiki_description?.value?.slice(0, 500) ?? undefined,
   }

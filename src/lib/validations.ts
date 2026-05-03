@@ -37,6 +37,7 @@ export const plantSpeciesSchema = z.object({
   description:          z.string().max(500, 'Max 500 characters').optional().or(z.literal('')),
   medicinal_properties: z.string().max(300, 'Max 300 characters').optional().or(z.literal('')),
   plant_family:         z.string().max(100).optional().or(z.literal('')),
+  genus:                z.string().max(100).optional().or(z.literal('')),
   toxicity:             z.string().max(50).optional().or(z.literal('')),
   edible_parts:         z.string().max(200).optional().or(z.literal('')),
   native_region:        z.string().max(150).optional().or(z.literal('')),
