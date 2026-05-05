@@ -37,6 +37,12 @@ export interface PlantSpecies {
   watering_needs: string | null
   interesting_fact: string | null
   life_span_description: string | null
+  foliage_type: string | null           // Evergreen | Deciduous | Semi-evergreen
+  conservation_status: string | null   // IUCN status e.g. Least Concern | Vulnerable
+  observations_count: number | null    // iNaturalist global observation count
+  growth_rate: string | null           // Slow | Moderate | Fast
+  propagation_methods: string | null   // pipe-separated e.g. "Seeds|Stem cuttings"
+  habitat_type: string | null          // e.g. "Tropical dry forest, scrublands"
   not_applicable_parts: string | null  // pipe-separated e.g. "fruit|bark|root"
   tentative: boolean
   active: boolean

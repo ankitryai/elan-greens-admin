@@ -46,6 +46,12 @@ export const plantSpeciesSchema = z.object({
   interesting_fact:     z.string().max(300).optional().or(z.literal('')),
   life_span_description:z.string().max(100).optional().or(z.literal('')),
   not_applicable_parts: z.string().optional().or(z.literal('')),
+  foliage_type:         z.string().max(50).optional().or(z.literal('')),
+  conservation_status:  z.string().max(100).optional().or(z.literal('')),
+  observations_count:   z.number().int().nonnegative().optional().or(z.literal('')),
+  growth_rate:          z.string().max(20).optional().or(z.literal('')),
+  propagation_methods:  z.string().max(200).optional().or(z.literal('')),
+  habitat_type:         z.string().max(200).optional().or(z.literal('')),
   tentative:            z.boolean(),
   notes:                z.string().max(300).optional().or(z.literal('')),
 })

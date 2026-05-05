@@ -255,6 +255,50 @@ export default function AddSpeciesPage() {
           </Field>
         </section>
 
+        {/* Section 3b — Enrichment Data */}
+        <section className="space-y-4">
+          <h2 className="text-base font-semibold text-gray-700 border-b pb-2">
+            3b. Enrichment Data
+            <span className="ml-2 text-[11px] font-normal text-gray-400">
+              (fill after saving — use Fetch Enrichment on the edit page)
+            </span>
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Foliage Type">
+              <Select onValueChange={v => setValue('foliage_type', v as PlantSpeciesFormData['foliage_type'])}>
+                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Evergreen">Evergreen</SelectItem>
+                  <SelectItem value="Deciduous">Deciduous</SelectItem>
+                  <SelectItem value="Semi-evergreen">Semi-evergreen</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Conservation Status">
+              <Input {...register('conservation_status')} placeholder="e.g. Least Concern" />
+            </Field>
+            <Field label="Growth Rate">
+              <Select onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}>
+                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Slow">Slow</SelectItem>
+                  <SelectItem value="Moderate">Moderate</SelectItem>
+                  <SelectItem value="Fast">Fast</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="iNat Observations">
+              <Input {...register('observations_count')} type="number" min={0} placeholder="e.g. 12500" />
+            </Field>
+          </div>
+          <Field label="Propagation Methods">
+            <Input {...register('propagation_methods')} placeholder="e.g. Seeds|Stem cuttings|Division" />
+          </Field>
+          <Field label="Habitat Type">
+            <Input {...register('habitat_type')} placeholder="e.g. Tropical dry forest, scrublands" />
+          </Field>
+        </section>
+
         {/* Section 4 — Not applicable parts */}
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">4. Image Categories (N/A)</h2>

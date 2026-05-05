@@ -1,11 +1,12 @@
 'use client'
 // =============================================================================
-// ApiCounter — Displays Plant.id and Google Vision API usage this month
+// ApiCounter — Displays Plant.id and Google Vision API usage
 //
 // WHY show this on the upload screen?
-// Both APIs have hard monthly free-tier limits (100 and 1,000 respectively).
-// Making the count visible encourages careful usage and avoids surprise
-// quota exhaustion mid-month.
+// Plant.id has a one-time lifetime grant of 100 credits (NOT per month — they
+// do NOT reset). Google Vision has a monthly free-tier limit of 1,000 calls.
+// Making the count visible encourages careful usage and avoids exhausting the
+// Plant.id lifetime budget.
 //
 // Counts are stored in localStorage because neither API provides a remaining-
 // quota endpoint on the free tier. localStorage resets when the user clears
@@ -59,9 +60,9 @@ export default function ApiCounter() {
 
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1">
-      <p className="text-xs font-medium text-gray-700 mb-2">Free API usage this month</p>
-      {row('Plant.id identifications', plantIdCount, PLANT_ID_LIMIT)}
-      {row('Google Vision (fallback)', visionCount,  VISION_LIMIT)}
+      <p className="text-xs font-medium text-gray-700 mb-2">API usage</p>
+      {row('Plant.id identifications (lifetime)', plantIdCount, PLANT_ID_LIMIT)}
+      {row('Google Vision (monthly, fallback)',   visionCount,  VISION_LIMIT)}
     </div>
   )
 }

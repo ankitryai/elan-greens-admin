@@ -34,6 +34,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
 import type { FetchDebug } from '@/app/api/fetch-images/route'
+import type { EnrichmentResult } from '@/app/api/fetch-enrichment/route'
 
 const PLANT_ID_LIMIT = 100
 
@@ -175,6 +176,10 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   // Key format: "<category>_<slot>" e.g. "bark_1", "roots_2"
   const [deletedSaved, setDeletedSaved]           = useState<Set<string>>(new Set())
 
+  // Enrichment data state
+  const [fetchingEnrichment, setFetchingEnrichment] = useState(false)
+  const [enrichmentPreview, setEnrichmentPreview]   = useState<EnrichmentResult | null>(null)
+
   // Plant.id identification state
   const [identifying, setIdentifying]             = useState(false)
   const [identifySuggestion, setIdentifySuggestion] = useState<IdentifySuggestion | null>(null)
@@ -209,6 +214,12 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
       interesting_fact:      species.interesting_fact      ?? '',
       life_span_description: species.life_span_description ?? '',
       not_applicable_parts:  species.not_applicable_parts  ?? '',
+      foliage_type:          species.foliage_type          ?? '',
+      conservation_status:   species.conservation_status   ?? '',
+      observations_count:    species.observations_count    ?? '',
+      growth_rate:           species.growth_rate           ?? '',
+      propagation_methods:   species.propagation_methods   ?? '',
+      habitat_type:          species.habitat_type          ?? '',
       tentative:             species.tentative,
       notes:                 species.notes                 ?? '',
     },
@@ -359,6 +370,56 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     }
   }
 
+  // ── Enrichment data fetch ─────────────────────────────────────────────────
+  async function handleFetchEnrichment() {
+    const botanicalName = watch('botanical_name') ?? species.botanical_name ?? ''
+    if (!botanicalName.trim()) {
+      toast.warning('Fill in the Botanical Name first — enrichment APIs look up by scientific name.')
+      return
+    }
+    setFetchingEnrichment(true)
+    setEnrichmentPreview(null)
+    try {
+      const res = await fetch(`/api/fetch-enrichment?name=${encodeURIComponent(botanicalName.trim())}`)
+      if (!res.ok) throw new Error('Enrichment fetch failed')
+      const data = await res.json() as EnrichmentResult
+      const found = [
+        data.foliage_type, data.conservation_status, data.observations_count,
+        data.growth_rate, data.propagation_methods, data.habitat_type,
+      ].filter(v => v !== null && v !== undefined).length
+      if (found === 0) {
+        toast.warning('No enrichment data found for this botanical name across GBIF, POWO, iNaturalist and IUCN.')
+      } else {
+        setEnrichmentPreview(data)
+        toast.success(`${found} enrichment field${found !== 1 ? 's' : ''} found — review below and apply`)
+      }
+    } catch (err) {
+      toast.error(`Enrichment fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
+    } finally {
+      setFetchingEnrichment(false)
+    }
+  }
+
+  function applyEnrichment(onlyEmpty: boolean) {
+    if (!enrichmentPreview) return
+    const e = enrichmentPreview
+    const set = (field: keyof PlantSpeciesFormData, value: string | number | null | undefined) => {
+      if (value === null || value === undefined || value === '') return
+      const current = (watch(field) ?? '') as string
+      if (!onlyEmpty || !current.toString().trim()) {
+        setValue(field, value as never)
+      }
+    }
+    set('foliage_type',        e.foliage_type)
+    set('conservation_status', e.conservation_status)
+    set('observations_count',  e.observations_count)
+    set('growth_rate',         e.growth_rate)
+    set('propagation_methods', e.propagation_methods)
+    set('habitat_type',        e.habitat_type)
+    toast.success(onlyEmpty ? 'Empty enrichment fields filled ✓' : 'All enrichment fields overwritten ✓')
+    setEnrichmentPreview(null)
+  }
+
   // ── Delete / restore saved DB images ─────────────────────────────────────
   function deleteSavedImage(cat: string, slot: 1 | 2) {
     setDeletedSaved(prev => new Set([...prev, `${cat}_${slot}`]))
@@ -506,7 +567,7 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
                   {/* Warn if quota is low */}
                   {isExhausted && (
                     <div className="text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
-                      ✗ Monthly Plant.id quota exhausted ({PLANT_ID_LIMIT} calls used). Resets on the 1st of next month.
+                      ✗ Plant.id lifetime quota exhausted ({PLANT_ID_LIMIT} calls used). Purchase more credits at kindwise.com to continue.
                     </div>
                   )}
                   {!isExhausted && isLow && (
@@ -766,6 +827,161 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
           </Field>
           <Field label="Interesting Fact"><Input {...register('interesting_fact')} /></Field>
           <Field label="Internal Notes"><Input {...register('notes')} /></Field>
+        </section>
+
+        {/* ── Enrichment Data ──────────────────────────────────────────────── */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div>
+              <h2 className="text-base font-semibold text-gray-700">Enrichment Data</h2>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Auto-fetched from GBIF · POWO (Kew) · iNaturalist · IUCN Red List — all free APIs
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={fetchingEnrichment}
+              onClick={handleFetchEnrichment}
+              className="text-xs text-green-700 border-green-300"
+            >
+              {fetchingEnrichment ? '🔄 Fetching…' : '🌿 Fetch Enrichment Data'}
+            </Button>
+          </div>
+
+          {/* Preview panel — shown after a successful fetch, before admin applies */}
+          {enrichmentPreview && (() => {
+            const rows: [string, string, string | number | null][] = [
+              ['Foliage Type',        watch('foliage_type')        ?? '', enrichmentPreview.foliage_type],
+              ['Conservation Status', watch('conservation_status') ?? '', enrichmentPreview.conservation_status],
+              ['Observations',        watch('observations_count')?.toString() ?? '', enrichmentPreview.observations_count],
+              ['Growth Rate',         watch('growth_rate')         ?? '', enrichmentPreview.growth_rate],
+              ['Propagation Methods', watch('propagation_methods') ?? '', enrichmentPreview.propagation_methods],
+              ['Habitat Type',        watch('habitat_type')        ?? '', enrichmentPreview.habitat_type],
+            ].filter(([,, suggested]) => suggested !== null) as [string, string, string | number][]
+            const sources = enrichmentPreview._sources
+            return (
+              <div className="space-y-3">
+                {/* Source status row */}
+                <div className="flex flex-wrap gap-2">
+                  {(['gbif','powo','inaturalist','iucn'] as const).map(src => (
+                    <span key={src} className={`text-[10px] px-2 py-0.5 rounded-full font-medium
+                      ${sources[src] === 'ok'    ? 'bg-green-100 text-green-700' :
+                        sources[src] === 'miss'  ? 'bg-gray-100 text-gray-500'  :
+                                                   'bg-red-100 text-red-500'}`}>
+                      {src.toUpperCase()} {sources[src] === 'ok' ? '✓' : sources[src] === 'miss' ? '—' : '✗'}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Diff table */}
+                <div className="rounded-lg border border-gray-200 overflow-hidden text-xs">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium w-36">Field</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium">Current</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium">Fetched</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {rows.map(([label, current, suggested]) => (
+                        <tr key={label} className={!current && suggested ? 'bg-green-50' : ''}>
+                          <td className="px-3 py-2 font-medium text-gray-600">{label}</td>
+                          <td className="px-3 py-2 text-gray-400 italic">
+                            {current || <span className="text-red-400">empty</span>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-700">{String(suggested)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50">
+                    Rows highlighted green = currently empty, will be filled.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    className="text-xs"
+                    style={{ backgroundColor: '#2E7D32', color: 'white' }}
+                    onClick={() => applyEnrichment(true)}
+                  >
+                    ✓ Fill empty fields only (safe)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="text-xs text-amber-700 border-amber-300"
+                    onClick={() => {
+                      if (window.confirm('This will overwrite ALL enrichment fields, including ones already filled. Continue?')) {
+                        applyEnrichment(false)
+                      }
+                    }}
+                  >
+                    ⚠ Overwrite all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="text-xs"
+                    onClick={() => setEnrichmentPreview(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Editable enrichment fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Foliage Type">
+              <Select
+                defaultValue={species.foliage_type ?? ''}
+                onValueChange={v => setValue('foliage_type', v as PlantSpeciesFormData['foliage_type'])}
+              >
+                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Evergreen">Evergreen</SelectItem>
+                  <SelectItem value="Deciduous">Deciduous</SelectItem>
+                  <SelectItem value="Semi-evergreen">Semi-evergreen</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Conservation Status">
+              <Input {...register('conservation_status')}
+                placeholder="e.g. Least Concern, Vulnerable" />
+            </Field>
+            <Field label="Growth Rate">
+              <Select
+                defaultValue={species.growth_rate ?? ''}
+                onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}
+              >
+                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Slow">Slow</SelectItem>
+                  <SelectItem value="Moderate">Moderate</SelectItem>
+                  <SelectItem value="Fast">Fast</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="iNat Observations">
+              <Input {...register('observations_count')}
+                type="number" min={0}
+                placeholder="e.g. 12500" />
+            </Field>
+          </div>
+          <Field label="Propagation Methods" error={errors.propagation_methods?.message}>
+            <Input {...register('propagation_methods')}
+              placeholder="Pipe-separated e.g. Seeds|Stem cuttings|Division" />
+            <p className="text-[10px] text-gray-400 mt-0.5">Separate multiple methods with |</p>
+          </Field>
+          <Field label="Habitat Type">
+            <Input {...register('habitat_type')}
+              placeholder="e.g. Tropical dry forest, scrublands" />
+          </Field>
         </section>
 
         {/* ── N/A image categories ─────────────────────────────────────────── */}
