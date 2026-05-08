@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -258,4 +258,55 @@ export async function getLastUpdatedTimestamp(): Promise<string | null> {
     .filter(Boolean) as string[]
   if (timestamps.length === 0) return null
   return timestamps.sort().reverse()[0]
+}
+
+// ── SPECIES LINKS ─────────────────────────────────────────────────────────────
+
+export async function getLinkedSpecies(speciesId: string): Promise<LinkedSpeciesCard[]> {
+  const db = createServiceRoleClient()
+  // Fetch all link rows where this species appears on either side
+  const { data, error } = await db
+    .from('plant_species_links')
+    .select('id, species_a_id, species_b_id, link_label')
+    .or(`species_a_id.eq.${speciesId},species_b_id.eq.${speciesId}`)
+  if (error) throw new Error(`Failed to load linked species: ${error.message}`)
+  if (!data || data.length === 0) return []
+
+  // Collect the IDs of the "other" side for each link
+  const otherIds = data.map(row =>
+    row.species_a_id === speciesId ? row.species_b_id : row.species_a_id
+  )
+
+  const { data: others, error: othersErr } = await db
+    .from('plant_species')
+    .select('id, common_name, botanical_name, category, img_main_url')
+    .in('id', otherIds)
+  if (othersErr) throw new Error(`Failed to load linked species details: ${othersErr.message}`)
+
+  const othersMap = new Map((others ?? []).map(s => [s.id, s]))
+
+  return data.map(row => {
+    const otherId = row.species_a_id === speciesId ? row.species_b_id : row.species_a_id
+    const other   = othersMap.get(otherId)
+    return {
+      link_id:        row.id,
+      link_label:     row.link_label,
+      species_id:     otherId,
+      common_name:    other?.common_name    ?? 'Unknown',
+      botanical_name: other?.botanical_name ?? null,
+      category:       other?.category       ?? '',
+      img_main_url:   other?.img_main_url   ?? null,
+    }
+  })
+}
+
+export async function getAllSpeciesSnippets(): Promise<SpeciesSnippet[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('plant_species')
+    .select('id, plant_id, common_name, botanical_name')
+    .is('deleted_at', null)
+    .order('common_name')
+  if (error) throw new Error(`Failed to load species list: ${error.message}`)
+  return data as SpeciesSnippet[]
 }

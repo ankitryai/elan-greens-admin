@@ -24,6 +24,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
 import type { PlantSpecies } from '@/types'
+import type { LinkedSpeciesCard, SpeciesSnippet } from '@/types'
 import type { SubImages } from '@/components/ImageUploader'
 import type { PlantIdResult } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -158,8 +159,17 @@ const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Gr
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const
 const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
+const LINK_LABELS = ['Same genus', 'Variety / Cultivar', 'Same family', 'Related species'] as const
 
-export default function EditSpeciesForm({ species }: { species: PlantSpecies }) {
+export default function EditSpeciesForm({
+  species,
+  initialLinkedSpecies,
+  allSpeciesSnippets,
+}: {
+  species:              PlantSpecies
+  initialLinkedSpecies: LinkedSpeciesCard[]
+  allSpeciesSnippets:   SpeciesSnippet[]
+}) {
   const router = useRouter()
   const [saving, setSaving]                       = useState(false)
   const [photoProcessing, setPhotoProcessing]     = useState(false)
@@ -179,6 +189,13 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
   // Enrichment data state
   const [fetchingEnrichment, setFetchingEnrichment] = useState(false)
   const [enrichmentPreview, setEnrichmentPreview]   = useState<EnrichmentResult | null>(null)
+
+  // Linked subspecies state
+  const [linkedSpecies, setLinkedSpecies]   = useState<LinkedSpeciesCard[]>(initialLinkedSpecies)
+  const [newLinkTargetId, setNewLinkTargetId] = useState('')
+  const [newLinkLabel, setNewLinkLabel]       = useState(LINK_LABELS[0] as string)
+  const [addingLink, setAddingLink]           = useState(false)
+  const [removingLinkId, setRemovingLinkId]   = useState<string | null>(null)
 
   // Plant.id identification state
   const [identifying, setIdentifying]             = useState(false)
@@ -490,6 +507,40 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
     } finally {
       setSaving(false)
     }
+  }
+
+  async function handleAddLink() {
+    if (!newLinkTargetId) return
+    setAddingLink(true)
+    try {
+      const res = await fetch('/api/species-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ species_a_id: species.id, species_b_id: newLinkTargetId, link_label: newLinkLabel }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error ?? 'Failed to add link')
+        return
+      }
+      // Refresh list from server (ensures both-direction data is accurate)
+      const refresh = await fetch(`/api/species-links?species_id=${species.id}`)
+      if (refresh.ok) setLinkedSpecies(await refresh.json())
+      setNewLinkTargetId('')
+      toast.success('Link added')
+    } catch { toast.error('Failed to add link') }
+    finally  { setAddingLink(false) }
+  }
+
+  async function handleRemoveLink(linkId: string) {
+    setRemovingLinkId(linkId)
+    try {
+      const res = await fetch(`/api/species-links/${linkId}`, { method: 'DELETE' })
+      if (!res.ok) { toast.error('Failed to remove link'); return }
+      setLinkedSpecies(prev => prev.filter(l => l.link_id !== linkId))
+      toast.success('Link removed')
+    } catch { toast.error('Failed to remove link') }
+    finally  { setRemovingLinkId(null) }
   }
 
   const currentNAP = (watch('not_applicable_parts') ?? '').split('|').filter(Boolean)
@@ -1271,6 +1322,89 @@ export default function EditSpeciesForm({ species }: { species: PlantSpecies }) 
             <p className="text-xs text-amber-600 border-t pt-2">
               ↑ Blue-bordered images are from the latest fetch and will be saved when you click Save Changes.
             </p>
+          )}
+        </section>
+
+        {/* ── Linked Species ──────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Linked Species</h2>
+          <p className="text-xs text-gray-400">
+            Link related varieties or species found in this garden. Links are bidirectional — adding one here automatically surfaces it on the other plant&apos;s page.
+          </p>
+
+          {/* Add new link row */}
+          <div className="flex gap-2 flex-wrap items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs text-gray-500 mb-1">Species</label>
+              <select
+                value={newLinkTargetId}
+                onChange={e => setNewLinkTargetId(e.target.value)}
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">— select a plant —</option>
+                {allSpeciesSnippets
+                  .filter(s => !linkedSpecies.some(l => l.species_id === s.id))
+                  .map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.common_name} ({s.plant_id}){s.botanical_name ? ` · ${s.botanical_name}` : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Relationship</label>
+              <select
+                value={newLinkLabel}
+                onChange={e => setNewLinkLabel(e.target.value)}
+                className="border border-gray-200 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                {LINK_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <Button type="button" onClick={handleAddLink}
+              disabled={!newLinkTargetId || addingLink}
+              variant="outline" className="text-xs">
+              {addingLink ? 'Adding…' : '+ Add Link'}
+            </Button>
+          </div>
+
+          {/* Existing links */}
+          {linkedSpecies.length > 0 ? (
+            <ul className="space-y-2">
+              {linkedSpecies.map(link => (
+                <li key={link.link_id}
+                  className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {link.img_main_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={link.img_main_url} alt={link.common_name}
+                        className="h-10 w-12 object-cover rounded flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{link.common_name}</p>
+                      {link.botanical_name && (
+                        <p className="text-xs italic text-gray-400 truncate">{link.botanical_name}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-green-200 text-green-700">
+                      {link.link_label}
+                    </span>
+                    <button type="button"
+                      onClick={() => handleRemoveLink(link.link_id)}
+                      disabled={removingLinkId === link.link_id}
+                      className="text-gray-400 hover:text-red-500 text-lg leading-none px-1"
+                      title="Remove link"
+                    >
+                      {removingLinkId === link.link_id ? '…' : '×'}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-gray-400 italic">No linked species yet.</p>
           )}
         </section>
 

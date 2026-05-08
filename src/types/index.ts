@@ -127,3 +127,23 @@ export interface DashboardStats {
   staffCount: number
   storageUsedBytes: number   // from Supabase Storage API
 }
+
+// ── plant_species_links ───────────────────────────────────────────────────────
+// Normalised view — always exposes the "other" species relative to the one
+// being displayed. One DB row covers both directions via OR query.
+export interface LinkedSpeciesCard {
+  link_id:        string
+  link_label:     string
+  species_id:     string
+  common_name:    string
+  botanical_name: string | null
+  category:       string
+  img_main_url:   string | null
+}
+
+export interface SpeciesSnippet {
+  id:             string
+  plant_id:       string
+  common_name:    string
+  botanical_name: string | null
+}
