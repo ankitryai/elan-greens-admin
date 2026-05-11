@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import type { EnrichmentResult } from '@/app/api/fetch-enrichment/route'
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const
@@ -27,12 +28,14 @@ const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
 
 export default function AddSpeciesPage() {
   const router = useRouter()
-  const [imageBase64, setImageBase64]   = useState<string | null>(null)
-  const [subImages, setSubImages]       = useState<SubImages | null>(null)
-  const [aiConfidence, setAiConfidence] = useState<number | null>(null)
-  const [saving, setSaving]             = useState(false)
-  const [serverError, setServerError]   = useState<string | null>(null)
+  const [imageBase64, setImageBase64]         = useState<string | null>(null)
+  const [subImages, setSubImages]             = useState<SubImages | null>(null)
+  const [aiConfidence, setAiConfidence]       = useState<number | null>(null)
+  const [saving, setSaving]                   = useState(false)
+  const [serverError, setServerError]         = useState<string | null>(null)
   const [duplicateSpecies, setDuplicateSpecies] = useState<{ id: string; name: string } | null>(null)
+  const [populatingFromName, setPopulatingFromName] = useState(false)
+  const [populateStatus, setPopulateStatus]   = useState<string | null>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
     resolver: zodResolver(plantSpeciesSchema),
@@ -61,6 +64,53 @@ export default function AddSpeciesPage() {
     if (result.edibleParts)   setValue('edible_parts', result.edibleParts)
     if (result.description)   setValue('description', result.description)
     setValue('tentative', true)  // AI-filled data always starts tentative
+  }
+
+  // ── Populate all fields from botanical name ─────────────────────────────────
+  // Fires GBIF + POWO + iNat + IUCN (enrichment) and Wikimedia (images) in
+  // parallel using the same free APIs as the Edit page "Fetch Enrichment" button.
+  // Works even when Vision/Plant.id fail — name alone is enough.
+  async function handlePopulateFromName() {
+    const botanical = (watch('botanical_name') ?? '').trim()
+    if (!botanical) return
+
+    setPopulatingFromName(true)
+    setPopulateStatus('Fetching from GBIF · POWO · iNaturalist · IUCN · Wikimedia…')
+
+    try {
+      const [enrichRes, imagesRes] = await Promise.all([
+        fetch(`/api/fetch-enrichment?name=${encodeURIComponent(botanical)}`),
+        fetch(`/api/fetch-images?name=${encodeURIComponent(botanical)}`),
+      ])
+
+      const filled: string[] = []
+
+      if (enrichRes.ok) {
+        const e = await enrichRes.json() as EnrichmentResult
+        if (e.foliage_type)             { setValue('foliage_type',          e.foliage_type as PlantSpeciesFormData['foliage_type']); filled.push('Foliage') }
+        if (e.conservation_status)      { setValue('conservation_status',   e.conservation_status); filled.push('Conservation') }
+        if (e.observations_count != null) { setValue('observations_count',  e.observations_count); filled.push('iNat Observations') }
+        if (e.growth_rate)              { setValue('growth_rate',           e.growth_rate as PlantSpeciesFormData['growth_rate']); filled.push('Growth Rate') }
+        if (e.propagation_methods)      { setValue('propagation_methods',   e.propagation_methods); filled.push('Propagation') }
+        if (e.habitat_type)             { setValue('habitat_type',          e.habitat_type); filled.push('Habitat') }
+      }
+
+      if (imagesRes.ok) {
+        const imgs = await imagesRes.json() as SubImages
+        const hasAny = Object.values(imgs).some(arr => arr.length > 0)
+        if (hasAny) { setSubImages(imgs); filled.push('Images') }
+      }
+
+      setPopulateStatus(
+        filled.length > 0
+          ? `✅ Filled: ${filled.join(' · ')}. Review before saving.`
+          : `No data found for "${botanical}" across free APIs — fill remaining fields manually.`
+      )
+    } catch {
+      setPopulateStatus('Fetch failed — check your connection and try again.')
+    } finally {
+      setPopulatingFromName(false)
+    }
   }
 
   async function onSubmit(data: PlantSpeciesFormData) {
@@ -168,9 +218,30 @@ export default function AddSpeciesPage() {
           </Field>
 
           <Field label="Botanical Name" error={errors.botanical_name?.message}>
-            <Input {...register('botanical_name')} placeholder="e.g. Azadirachta indica" />
-            {watch('botanical_name') && !watch('botanical_name')?.includes(' ') && (
-              <p className="text-xs text-amber-500 mt-1">Botanical names usually have two words. Double-check this.</p>
+            <div className="flex gap-2 items-center">
+              <Input {...register('botanical_name')} placeholder="e.g. Azadirachta indica" className="flex-1" />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!watchedBotanical?.trim().includes(' ') || populatingFromName}
+                onClick={handlePopulateFromName}
+                className="shrink-0 text-xs text-green-700 border-green-300 hover:bg-green-50 disabled:opacity-40"
+                title="Fetch description, enrichment data, and images from free APIs using this botanical name"
+              >
+                {populatingFromName ? '⏳ Fetching…' : '🌿 Populate from Name'}
+              </Button>
+            </div>
+            {watchedBotanical && !watchedBotanical.includes(' ') && (
+              <p className="text-xs text-amber-500 mt-1">Botanical names usually have two words — button activates once you enter the full name.</p>
+            )}
+            {populateStatus && (
+              <p className={`text-xs mt-1.5 px-2.5 py-1.5 rounded-lg border ${
+                populateStatus.startsWith('✅')
+                  ? 'text-green-700 bg-green-50 border-green-100'
+                  : 'text-amber-700 bg-amber-50 border-amber-100'
+              }`}>
+                {populateStatus}
+              </p>
             )}
           </Field>
 
@@ -260,7 +331,7 @@ export default function AddSpeciesPage() {
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">
             3b. Enrichment Data
             <span className="ml-2 text-[11px] font-normal text-gray-400">
-              (fill after saving — use Fetch Enrichment on the edit page)
+              (auto-filled by 🌿 Populate from Name above — or complete after saving via the edit page)
             </span>
           </h2>
           <div className="grid grid-cols-2 gap-3">
