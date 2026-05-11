@@ -1,13 +1,14 @@
 'use client'
 // =============================================================================
-// ImageUploader — Camera → Resize → Plant.id → Wikimedia → Preview
+// ImageUploader — Camera → Resize → Vision (auto) → Plant.id (explicit CTA)
 //
 // This is the most complex component in the admin app. Its job:
 //   1. Accept a photo from camera or gallery
 //   2. Resize it client-side before upload (saves storage)
-//   3. Call /api/identify-plant (Plant.id) → fill species fields if confident
-//   4. If confidence < 70% or quota hit → call /api/vision-fallback
-//   5. Call /api/fetch-images (Wikimedia Commons) with the botanical name
+//   3. Auto-call Google Vision (1 000/month, renews) — always fires on upload
+//   4. Show an explicit "Identify with Plant.id" button — NEVER fires silently.
+//      Plant.id has 100 lifetime credits total; must be a deliberate choice.
+//   5. Call /api/fetch-images (Wikimedia Commons) with the identified name
 //   6. Show the admin a preview of all results for review before saving
 //
 // WHY client component? Camera input, EXIF reading, image compression, and
@@ -60,7 +61,14 @@ export default function ImageUploader({
   const [storageRevision, setStorageRevision] = useState(0)
   const [status, setStatus]               = useState<string>('')
   const [isProcessing, setIsProcessing]   = useState(false)
+  const [isIdentifying, setIsIdentifying] = useState(false)
   const [visionResult, setVisionResult]   = useState<{ label: string | null; entities: string[] } | null>(null)
+  // Holds the compressed base64 of the current photo so the explicit
+  // Plant.id button can use it without re-reading the file.
+  const [currentBase64, setCurrentBase64] = useState<string | null>(null)
+  const [plantIdUsed, setPlantIdUsed]     = useState(() =>
+    typeof window !== 'undefined' ? getApiCount('plantid') : 0
+  )
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -71,11 +79,11 @@ export default function ImageUploader({
     }
 
     setIsProcessing(true)
+    setVisionResult(null)
     setStatus('Resizing image…')
     setOriginalSize(file.size)
 
     // ── Step 1: Client-side resize ──────────────────────────────────────────
-    // Max 800px wide, 75% quality — reduces storage use without visible quality loss.
     const compressed = await imageCompression(file, {
       maxWidthOrHeight: 800,
       initialQuality: 0.75,
@@ -83,34 +91,42 @@ export default function ImageUploader({
     })
     setCompressedSize(compressed.size)
 
-    if (file.size > 2 * 1024 * 1024) {
-      setStatus(`⚠️ Large image detected. Resized from ${formatKB(file.size)} to ${formatKB(compressed.size)}.`)
-    } else {
-      setStatus(`✅ Resized: ${formatKB(file.size)} → ${formatKB(compressed.size)}`)
-    }
-
-    // Convert to base64 for API calls and preview
     const base64 = await toBase64(compressed)
     setPreview(base64)
+    setCurrentBase64(base64)          // store for explicit Plant.id button
     setStorageRevision(r => r + 1)
     onImageReady(base64, storageRevision + 1)
 
-    // ── Step 2: Plant.id identification ────────────────────────────────────
-    const plantIdUsed = getApiCount('plantid')
-    if (plantIdUsed >= 100) {
-      setStatus('Plant.id quota reached for this month. Trying Google Vision…')
-      await runVisionFallback(base64)
+    if (file.size > 2 * 1024 * 1024) {
+      setStatus(`⚠️ Large image — resized from ${formatKB(file.size)} to ${formatKB(compressed.size)}.`)
+    } else {
+      setStatus(`✅ Saved ${formatKB(file.size)} → ${formatKB(compressed.size)}`)
+    }
+
+    // ── Step 2: Google Vision — always runs automatically ──────────────────
+    // Vision has 1 000 free calls/month (renews). Plant.id is an explicit CTA.
+    await runVisionFallback(base64)
+  }
+
+  // ── Explicit Plant.id identification (CTA button — never auto-fires) ──────
+  async function handleIdentifyWithPlantId() {
+    if (!currentBase64) return
+    const used = getApiCount('plantid')
+    if (used >= 100) {
+      setStatus('⚠️ Plant.id lifetime limit reached (100/100). Purchase more credits at kindwise.com.')
       return
     }
 
-    setStatus('Identifying plant with Plant.id…')
+    setIsIdentifying(true)
+    setStatus('Identifying with Plant.id…')
     try {
       const res = await fetch('/api/identify-plant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64.split(',')[1] }),
+        body: JSON.stringify({ imageBase64: currentBase64.split(',')[1] }),
       })
       incrementApiCount('plantid')
+      setPlantIdUsed(getApiCount('plantid'))
 
       if (!res.ok) throw new Error(`Plant.id responded with ${res.status}`)
 
@@ -118,45 +134,33 @@ export default function ImageUploader({
       const top = data.suggestions?.[0]
 
       if (!top) {
-        setStatus('Plant.id could not identify this image. Trying Google Vision…')
-        await runVisionFallback(base64)
+        setStatus('Plant.id could not identify this image. Try Google Vision suggestions above, or enter details manually.')
         return
       }
 
       const confidence = Math.round(top.probability * 100)
+      setStatus(`✅ Plant.id: "${top.plant_name}" (${confidence}% confidence). Fields updated — review before saving.`)
+      onIdentified(buildResult(top, confidence))
+      if (top.plant_name) await fetchSubImages(top.plant_name)
 
-      if (top.probability < 0.70) {
-        setStatus(
-          `Plant.id suggests "${top.plant_name}" (${confidence}% confidence — low). Trying Google Vision…`
-        )
-        // Still pass the Plant.id result to the parent as a hint, then get Vision result too.
-        onIdentified(buildResult(top, confidence))
-        await runVisionFallback(base64)
-      } else {
-        setStatus(`✅ Plant.id identified: "${top.plant_name}" (${confidence}% confidence). Review fields below.`)
-        onIdentified(buildResult(top, confidence))
-        // Trigger Wikimedia image fetch automatically with the botanical name.
-        if (top.plant_name) await fetchSubImages(top.plant_name)
-      }
-
-    } catch (err) {
-      setStatus('Plant.id failed. Trying Google Vision…')
-      await runVisionFallback(base64)
+    } catch {
+      setStatus('Plant.id request failed. Use the Vision suggestions above, or enter details manually.')
     } finally {
-      setIsProcessing(false)
+      setIsIdentifying(false)
     }
   }
 
-  // ── Google Vision fallback ────────────────────────────────────────────────
+  // ── Google Vision — primary auto-identification ───────────────────────────
+  // Runs immediately on photo upload. 1 000 calls/month, renews monthly.
   async function runVisionFallback(base64: string) {
     const visionUsed = getApiCount('vision')
     if (visionUsed >= 1000) {
-      setStatus('⚠️ Both Plant.id and Google Vision quotas exhausted. Please enter plant details manually.')
+      setStatus('⚠️ Google Vision monthly limit reached (1 000/1 000). Use the Plant.id button below, or enter details manually.')
       setIsProcessing(false)
       return
     }
 
-    setStatus('Checking Google Vision…')
+    setStatus(prev => `${prev} · Checking Google Vision…`)
     try {
       const res = await fetch('/api/vision-fallback', {
         method: 'POST',
@@ -171,16 +175,17 @@ export default function ImageUploader({
       const label = data.bestGuessLabel
       const entities = data.webEntities.map(e => e.description).filter(Boolean)
       setVisionResult({ label, entities })
-      setStatus(
-        `Google Vision suggests: "${label ?? entities[0] ?? 'unknown'}". Review and confirm below.`
+      setStatus(prev =>
+        prev.replace('· Checking Google Vision…', '') +
+        ` · Google Vision suggests: "${label ?? entities[0] ?? 'unknown'}".`
       )
 
-      // If Vision gave us something useful, try Wikimedia with it.
+      // Fetch Wikimedia sub-images with Vision's best guess.
       const candidate = label ?? entities[0]
       if (candidate) await fetchSubImages(candidate)
 
     } catch {
-      setStatus('Google Vision also failed. Please enter plant details manually.')
+      setStatus(prev => prev.replace('· Checking Google Vision…', '') + ' · Google Vision also failed. Enter details manually or use Plant.id below.')
     } finally {
       setIsProcessing(false)
     }
@@ -248,6 +253,33 @@ export default function ImageUploader({
               Saved {formatKB(originalSize - compressedSize)} · final size {formatKB(compressedSize)}
             </p>
           )}
+        </div>
+      )}
+
+      {/* ── Explicit Plant.id CTA — never fires automatically ─────────────── */}
+      {currentBase64 && (
+        <div className={`flex items-center gap-3 rounded-lg px-3 py-2.5 border ${
+          plantIdUsed >= 100
+            ? 'bg-red-50 border-red-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <button
+            type="button"
+            onClick={handleIdentifyWithPlantId}
+            disabled={isIdentifying || isProcessing || plantIdUsed >= 100}
+            className={`text-sm font-medium px-3 py-1.5 rounded-md transition-colors ${
+              plantIdUsed >= 100
+                ? 'bg-red-100 text-red-400 cursor-not-allowed'
+                : 'bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 disabled:opacity-60'
+            }`}
+          >
+            {isIdentifying ? '🔍 Identifying…' : '🔬 Identify with Plant.id'}
+          </button>
+          <span className={`text-xs ${plantIdUsed >= 100 ? 'text-red-600 font-medium' : 'text-amber-700'}`}>
+            {plantIdUsed >= 100
+              ? '⚠️ Lifetime limit reached (100/100) — credits must be purchased to reuse'
+              : `${plantIdUsed}/100 lifetime credits used · more accurate than Vision`}
+          </span>
         </div>
       )}
 
