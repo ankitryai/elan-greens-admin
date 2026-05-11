@@ -13,7 +13,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
-import ImageUploader, { type IdentificationResult, type SubImages } from '@/components/ImageUploader'
+import ImageUploader, { type IdentificationResult } from '@/components/ImageUploader'
+import { sanitiseSubImages, hasAnySubImages, buildSubImageFields, IMAGE_PART_KEYS, type SubImages } from '@/lib/subImageHelpers'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -96,9 +97,11 @@ export default function AddSpeciesPage() {
       }
 
       if (imagesRes.ok) {
-        const imgs = await imagesRes.json() as SubImages
-        const hasAny = Object.values(imgs).some(arr => arr.length > 0)
-        if (hasAny) { setSubImages(imgs); filled.push('Images') }
+        // sanitiseSubImages strips _debug and any other non-array fields from
+        // the response — passing raw JSON to SubImagePreview causes
+        // "x.map is not a function" when _debug (an object) is iterated.
+        const imgs = sanitiseSubImages(await imagesRes.json() as Record<string, unknown>)
+        if (hasAnySubImages(imgs)) { setSubImages(imgs); filled.push('Images') }
       }
 
       setPopulateStatus(
@@ -140,7 +143,7 @@ export default function AddSpeciesPage() {
       }
 
       // Build image fields object from sub-image results.
-      const imageFields = buildImageFields(subImages)
+      const imageFields = buildSubImageFields(subImages)
 
       const res = await fetch('/api/plants', {
         method: 'POST',
@@ -468,47 +471,31 @@ function CharCountTextarea({
 }
 
 function SubImagePreview({ subImages }: { subImages: SubImages }) {
-  const categories = Object.entries(subImages) as [string, { url: string; attribution: string }[]][]
   return (
     <div className="space-y-3">
-      {categories.map(([cat, images]) => (
-        <div key={cat}>
-          <p className="text-xs font-medium text-gray-600 capitalize mb-1">{cat}</p>
-          {images.length === 0 ? (
-            <p className="text-xs text-gray-400 italic">No images found on Wikimedia for this category.</p>
-          ) : (
-            <div className="flex gap-2 flex-wrap">
-              {images.map(img => (
-                <div key={img.url} className="space-y-1">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt={`${cat} photo`} className="h-24 w-32 object-cover rounded border" />
-                  <p className="text-xs text-gray-400 max-w-[128px] truncate" title={img.attribution}>
-                    {img.attribution}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+      {IMAGE_PART_KEYS.map(cat => {
+        const images = subImages[cat]
+        return (
+          <div key={cat}>
+            <p className="text-xs font-medium text-gray-600 capitalize mb-1">{cat}</p>
+            {images.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">No images found on Wikimedia for this category.</p>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {images.map(img => (
+                  <div key={img.url} className="space-y-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.url} alt={`${cat} photo`} className="h-24 w-32 object-cover rounded border" />
+                    <p className="text-xs text-gray-400 max-w-[128px] truncate" title={img.attribution}>
+                      {img.attribution}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
-}
-
-// Flatten SubImages into the flat DB column structure
-function buildImageFields(subImages: SubImages | null): Record<string, string | null> {
-  if (!subImages) return {}
-  const f: Record<string, string | null> = {}
-  const map: [string, keyof SubImages][] = [
-    ['flower', 'flowers'], ['fruit', 'fruits'],
-    ['leaf', 'leaves'],    ['bark', 'bark'], ['root', 'roots'],
-  ]
-  for (const [prefix, key] of map) {
-    const imgs = subImages[key]
-    f[`img_${prefix}_1_url`]  = imgs[0]?.url ?? null
-    f[`img_${prefix}_1_attr`] = imgs[0]?.attribution ?? null
-    f[`img_${prefix}_2_url`]  = imgs[1]?.url ?? null
-    f[`img_${prefix}_2_attr`] = imgs[1]?.attribution ?? null
-  }
-  return f
 }
