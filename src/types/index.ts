@@ -165,3 +165,12 @@ export interface EnrichmentResult {
     iucn:        'ok' | 'miss' | 'error'
   }
 }
+
+// ── Fetch-images debug provenance ─────────────────────────────────────────────
+// Returned alongside image results — defined here so client components can
+// import it without pulling in the server-only fetch-images route module.
+export interface FetchDebug {
+  source:  'wikimedia' | 'inaturalist' | 'none'
+  query:   string          // the search query / name that produced results
+  level?:  'species' | 'genus'   // iNaturalist only
+}

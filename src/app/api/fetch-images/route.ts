@@ -19,7 +19,10 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
-import type { WikimediaImage } from '@/types'
+import type { WikimediaImage, FetchDebug } from '@/types'
+
+// Re-export so any server-side code that already imports from this route still works
+export type { FetchDebug }
 
 // ── Wikimedia ────────────────────────────────────────────────────────────────
 
@@ -196,11 +199,7 @@ async function fetchFromINaturalist(
 
 // ── Debug provenance ──────────────────────────────────────────────────────────
 
-export interface FetchDebug {
-  source:  'wikimedia' | 'inaturalist' | 'none'
-  query:   string          // the search query / name that produced results
-  level?:  'species' | 'genus'   // iNaturalist only
-}
+// FetchDebug type is defined in @/types — see re-export above
 
 // ── Combined fetch per category ───────────────────────────────────────────────
 

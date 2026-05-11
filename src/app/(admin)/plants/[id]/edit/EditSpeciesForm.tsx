@@ -34,8 +34,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
-import type { FetchDebug } from '@/app/api/fetch-images/route'
-import type { EnrichmentResult } from '@/app/api/fetch-enrichment/route'
+import type { FetchDebug, EnrichmentResult } from '@/types'
 
 const PLANT_ID_LIMIT = 100
 
