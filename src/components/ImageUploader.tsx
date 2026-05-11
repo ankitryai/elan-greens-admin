@@ -73,8 +73,8 @@ export default function ImageUploader({
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      setStatus('❌ Only JPEG and PNG images are supported.')
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setStatus('❌ Only JPEG, PNG, and WebP images are supported.')
       return
     }
 
@@ -211,7 +211,7 @@ export default function ImageUploader({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png"
+        accept="image/jpeg,image/png,image/webp"
         capture="environment"
         className="hidden"
         onChange={handleFileChange}
