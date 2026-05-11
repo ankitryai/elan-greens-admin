@@ -15,6 +15,19 @@ import { plantSpeciesSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { PlantSpecies } from '@/types'
 
+// Maps cryptic Postgres errors to a message that names the offending field.
+function friendlyDbError(msg: string): string {
+  if (msg.includes('invalid input syntax for type integer'))
+    return 'Field "iNat Observations (observations_count)" must be a whole number or left blank — it cannot be empty text.'
+  if (msg.includes('invalid input syntax for type'))
+    return `A field received the wrong data type. DB detail: ${msg}`
+  if (msg.includes('violates not-null constraint'))
+    return `A required field is missing. DB detail: ${msg}`
+  if (msg.includes('violates unique constraint'))
+    return `A value must be unique but already exists. DB detail: ${msg}`
+  return msg
+}
+
 export async function POST(request: NextRequest) {
   // Auth check on every write route
   const supabase = await createServerSupabaseClient()
@@ -73,16 +86,24 @@ export async function POST(request: NextRequest) {
     if (body[key]) (imageFields as Record<string, unknown>)[key] = body[key]
   }
 
+  // Convert empty strings to null so optional fields (esp. integer columns like
+  // observations_count) don't send "" to Postgres — that causes "invalid input
+  // syntax for type integer" errors.
+  const sanitised = Object.fromEntries(
+    Object.entries(parsed.data).map(([k, v]) => [k, v === '' ? null : v])
+  ) as typeof parsed.data
+
   try {
-    const species = await createSpecies(parsed.data, imageFields)
+    const species = await createSpecies(sanitised, imageFields)
     return NextResponse.json(species, { status: 201 })
   } catch (err) {
     // DB insert failed — clean up the image we already uploaded so Storage stays consistent
     if (uploadedPath && storageDb) {
       await storageDb.storage.from('plant-images').remove([uploadedPath])
     }
+    const raw = err instanceof Error ? err.message : 'Database error'
     return NextResponse.json(
-      { error: `Failed to save species: ${err instanceof Error ? err.message : 'Database error'}` },
+      { error: `Failed to save species: ${friendlyDbError(raw)}` },
       { status: 500 }
     )
   }

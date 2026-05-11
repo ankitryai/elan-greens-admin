@@ -7,6 +7,18 @@ import { plantSpeciesSchema } from '@/lib/validations'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { PlantSpecies } from '@/types'
 
+function friendlyDbError(msg: string): string {
+  if (msg.includes('invalid input syntax for type integer'))
+    return 'Field "iNat Observations (observations_count)" must be a whole number or left blank — it cannot be empty text.'
+  if (msg.includes('invalid input syntax for type'))
+    return `A field received the wrong data type. DB detail: ${msg}`
+  if (msg.includes('violates not-null constraint'))
+    return `A required field is missing. DB detail: ${msg}`
+  if (msg.includes('violates unique constraint'))
+    return `A value must be unique but already exists. DB detail: ${msg}`
+  return msg
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -75,7 +87,7 @@ export async function PATCH(
       await storageDb.storage.from('plant-images').remove([uploadedPath])
     }
     return NextResponse.json(
-      { error: `Failed to save changes: ${err instanceof Error ? err.message : 'Database error'}` },
+      { error: `Failed to save changes: ${friendlyDbError(err instanceof Error ? err.message : 'Database error')}` },
       { status: 500 }
     )
   }
