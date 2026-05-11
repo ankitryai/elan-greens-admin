@@ -147,3 +147,21 @@ export interface SpeciesSnippet {
   common_name:    string
   botanical_name: string | null
 }
+
+// ── Enrichment API result ─────────────────────────────────────────────────────
+// Returned by GET /api/fetch-enrichment — defined here (not in the route file)
+// so client components can import it without pulling in server-only modules.
+export interface EnrichmentResult {
+  foliage_type:        string | null
+  conservation_status: string | null
+  observations_count:  number | null
+  growth_rate:         string | null
+  propagation_methods: string | null
+  habitat_type:        string | null
+  _sources: {
+    gbif:        'ok' | 'miss' | 'error'
+    powo:        'ok' | 'miss' | 'error'
+    inaturalist: 'ok' | 'miss' | 'error'
+    iucn:        'ok' | 'miss' | 'error'
+  }
+}

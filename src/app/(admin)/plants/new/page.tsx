@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import type { EnrichmentResult } from '@/app/api/fetch-enrichment/route'
+import type { EnrichmentResult } from '@/types'
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const

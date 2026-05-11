@@ -16,23 +16,10 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
+import type { EnrichmentResult } from '@/types'
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface EnrichmentResult {
-  foliage_type:        string | null
-  conservation_status: string | null
-  observations_count:  number | null
-  growth_rate:         string | null
-  propagation_methods: string | null  // pipe-separated
-  habitat_type:        string | null
-  _sources: {
-    gbif:        'ok' | 'miss' | 'error'
-    powo:        'ok' | 'miss' | 'error'
-    inaturalist: 'ok' | 'miss' | 'error'
-    iucn:        'ok' | 'miss' | 'error'
-  }
-}
+// Re-export so any server-side code that already imports from this route still works
+export type { EnrichmentResult }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
