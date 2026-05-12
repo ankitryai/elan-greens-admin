@@ -43,9 +43,15 @@ export async function PATCH(
     Object.entries(parsed.data).map(([k, v]) => [k, v === '' ? null : v])
   ) as Partial<PlantSpecies>
 
-  // Only replace the main image if a new photo was uploaded
+  // Only replace the main image if a new photo was uploaded or a direct URL is promoted
   let uploadedPath: string | null = null
   const storageDb = imageBase64 ? createServiceRoleClient() : null
+
+  // Promote a sub-image to main photo (URL already in Storage — no upload needed)
+  if (!imageBase64 && typeof body.img_main_url === 'string' && body.img_main_url) {
+    fields.img_main_url  = body.img_main_url as string
+    fields.img_main_attr = typeof body.img_main_attr === 'string' ? body.img_main_attr : 'Promoted from gallery'
+  }
 
   if (imageBase64 && typeof imageBase64 === 'string' && storageDb) {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')

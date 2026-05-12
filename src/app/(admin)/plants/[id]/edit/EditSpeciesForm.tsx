@@ -35,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
 import type { FetchDebug, EnrichmentResult } from '@/types'
+import { sanitiseSubImages, hasAnySubImages } from '@/lib/subImageHelpers'
 
 const PLANT_ID_LIMIT = 100
 
@@ -188,6 +189,13 @@ export default function EditSpeciesForm({
   // Enrichment data state
   const [fetchingEnrichment, setFetchingEnrichment] = useState(false)
   const [enrichmentPreview, setEnrichmentPreview]   = useState<EnrichmentResult | null>(null)
+
+  // "Populate from Name" — fires enrichment + images together (same as Add page)
+  const [populatingFromName, setPopulatingFromName] = useState(false)
+  const [populateStatus, setPopulateStatus]         = useState<string | null>(null)
+
+  // Sub-image promoted to main photo when no main photo exists
+  const [promotedToMain, setPromotedToMain] = useState<{ url: string; attr: string | null } | null>(null)
 
   // Linked subspecies state
   const [linkedSpecies, setLinkedSpecies]   = useState<LinkedSpeciesCard[]>(initialLinkedSpecies)
@@ -436,6 +444,63 @@ export default function EditSpeciesForm({
     setEnrichmentPreview(null)
   }
 
+  // ── Populate all fields from botanical name (enrichment + images combined) ──
+  // Same one-click shortcut as the Add page — fires GBIF/POWO/iNat/IUCN and
+  // Wikimedia in parallel. Useful for legacy plants that only have a name saved.
+  async function handlePopulateFromName() {
+    const botanical = (watch('botanical_name') ?? species.botanical_name ?? '').trim()
+    if (!botanical) {
+      toast.warning('Fill in the Botanical Name first.')
+      return
+    }
+    setPopulatingFromName(true)
+    setPopulateStatus('Fetching from GBIF · POWO · iNaturalist · IUCN · Wikimedia…')
+    try {
+      const [enrichRes, imagesRes] = await Promise.all([
+        fetch(`/api/fetch-enrichment?name=${encodeURIComponent(botanical)}`),
+        fetch(`/api/fetch-images?name=${encodeURIComponent(botanical)}&common=${encodeURIComponent(species.common_name)}`),
+      ])
+      const filled: string[] = []
+
+      if (enrichRes.ok) {
+        const e = await enrichRes.json() as EnrichmentResult
+        const set = (field: keyof PlantSpeciesFormData, value: unknown) => {
+          if (value === null || value === undefined || value === '') return
+          const current = (watch(field) ?? '') as string
+          if (!current.toString().trim()) { setValue(field, value as never); return true }
+          return false
+        }
+        if (set('foliage_type',        e.foliage_type))        filled.push('Foliage')
+        if (set('conservation_status', e.conservation_status)) filled.push('Conservation')
+        if (e.observations_count != null) {
+          const cur = watch('observations_count')
+          if (!cur) { setValue('observations_count', e.observations_count); filled.push('iNat Observations') }
+        }
+        if (set('growth_rate',         e.growth_rate))         filled.push('Growth Rate')
+        if (set('propagation_methods', e.propagation_methods)) filled.push('Propagation')
+        if (set('habitat_type',        e.habitat_type))        filled.push('Habitat')
+      }
+
+      if (imagesRes.ok) {
+        const imgs = sanitiseSubImages(await imagesRes.json() as Record<string, unknown>)
+        if (hasAnySubImages(imgs)) {
+          setFetchedSubImages(imgs)
+          filled.push('Images')
+        }
+      }
+
+      setPopulateStatus(
+        filled.length > 0
+          ? `✅ Filled: ${filled.join(' · ')}. Review before saving.`
+          : `No data found for "${botanical}" — fill remaining fields manually.`
+      )
+    } catch {
+      setPopulateStatus('Fetch failed — check your connection and try again.')
+    } finally {
+      setPopulatingFromName(false)
+    }
+  }
+
   // ── Delete / restore saved DB images ─────────────────────────────────────
   function deleteSavedImage(cat: string, slot: 1 | 2) {
     setDeletedSaved(prev => new Set([...prev, `${cat}_${slot}`]))
@@ -487,10 +552,15 @@ export default function EditSpeciesForm({
         ...buildManualImageFields(manualImages, fetchedSubImages),           // manual next
         ...(fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}),  // fresh fetch wins
       }
+      // Promote a sub-image to main photo if selected (only when no upload is staged)
+      const mainPromotion = (!newImageBase64 && promotedToMain)
+        ? { img_main_url: promotedToMain.url, img_main_attr: promotedToMain.attr ?? 'Promoted from gallery' }
+        : {}
+
       const res = await fetch(`/api/plants/${species.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields }),
+        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields, ...mainPromotion }),
       })
       if (!res.ok) {
         const err = await res.json() as { error: string }
@@ -563,17 +633,52 @@ export default function EditSpeciesForm({
         {/* ── Main Photo ───────────────────────────────────────────────────── */}
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Main Photo</h2>
-          {previewUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="Current plant photo"
-              className="h-40 w-48 object-cover rounded-lg border" />
+
+          {/* Preview: uploaded > promoted sub-image > saved */}
+          {(previewUrl || promotedToMain) && (
+            <div className="relative inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl ?? promotedToMain!.url}
+                alt="Current plant photo"
+                className={`h-40 w-48 object-cover rounded-lg border ${
+                  promotedToMain && !previewUrl ? 'border-green-400 border-2' : ''
+                }`}
+              />
+              {promotedToMain && !previewUrl && (
+                <div className="absolute bottom-1.5 left-1.5 bg-green-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded leading-none">
+                  📌 Profile pic
+                </div>
+              )}
+            </div>
           )}
-          <input ref={mainFileRef} type="file" accept="image/jpeg,image/png"
+
+          {/* Banner when promoted (but no upload staged) */}
+          {promotedToMain && !newImageBase64 && (
+            <div className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <span className="text-green-700">📌 Sub-image will be used as the main photo on save.</span>
+              <button
+                type="button"
+                onClick={() => setPromotedToMain(null)}
+                className="text-red-500 underline shrink-0"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          {!previewUrl && !promotedToMain && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              ⚠ No main photo yet — upload one below, or mark a sub-image as profile pic in the gallery section.
+            </p>
+          )}
+
+          <input ref={mainFileRef} type="file" accept="image/jpeg,image/png,image/webp"
             capture="environment" className="hidden" onChange={handlePhotoChange} />
           <div className="flex items-center gap-3">
             <Button type="button" variant="outline" disabled={photoProcessing}
               onClick={() => mainFileRef.current?.click()}>
-              {photoProcessing ? 'Processing…' : '📷 Replace photo (optional)'}
+              {photoProcessing ? 'Processing…' : previewUrl ? '📷 Replace photo' : '📷 Upload main photo'}
             </Button>
             {newImageBase64 && (
               <span className="text-xs text-green-700 font-medium">✓ New photo ready to upload</span>
@@ -802,7 +907,31 @@ export default function EditSpeciesForm({
           </Field>
 
           <Field label="Botanical Name" error={errors.botanical_name?.message}>
-            <Input {...register('botanical_name')} />
+            <div className="flex gap-2 items-center">
+              <Input {...register('botanical_name')} className="flex-1" />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!watchedBotanical?.trim().includes(' ') || populatingFromName}
+                onClick={handlePopulateFromName}
+                className="shrink-0 text-xs text-green-700 border-green-300 hover:bg-green-50 disabled:opacity-40"
+                title="Fetch enrichment data and sub-images from free APIs using this botanical name"
+              >
+                {populatingFromName ? '⏳ Fetching…' : '🌿 Populate from Name'}
+              </Button>
+            </div>
+            {watchedBotanical && !watchedBotanical.includes(' ') && (
+              <p className="text-xs text-amber-500 mt-1">Enter the full two-word botanical name to enable.</p>
+            )}
+            {populateStatus && (
+              <p className={`text-xs mt-1.5 px-2.5 py-1.5 rounded-lg border ${
+                populateStatus.startsWith('✅')
+                  ? 'text-green-700 bg-green-50 border-green-100'
+                  : 'text-amber-700 bg-amber-50 border-amber-100'
+              }`}>
+                {populateStatus}
+              </p>
+            )}
           </Field>
 
           <div className="grid grid-cols-3 gap-3">
@@ -1159,8 +1288,10 @@ export default function EditSpeciesForm({
                       { url: savedUrl1, attr: savedAttr1, slot: 1 as const },
                       { url: savedUrl2, attr: savedAttr2, slot: 2 as const },
                     ] as const).filter(i => i.url).map(img => {
-                      const isDeleted    = deletedSaved.has(`${cat}_${img.slot}`)
-                      const isGenusMatch = img.attr?.includes('· genus match') ?? false
+                      const isDeleted      = deletedSaved.has(`${cat}_${img.slot}`)
+                      const isGenusMatch   = img.attr?.includes('· genus match') ?? false
+                      const isPromoted     = promotedToMain?.url === img.url
+                      const noMainPhoto    = !previewUrl && !newImageBase64
                       return (
                         <div key={img.slot} className="space-y-0.5">
                           <div className="relative group">
@@ -1169,18 +1300,25 @@ export default function EditSpeciesForm({
                               src={img.url!}
                               alt={cat}
                               className={`h-24 w-32 object-cover rounded-lg border transition-opacity
-                                ${isDeleted
-                                  ? 'opacity-30 border-red-300'
-                                  : 'border-green-200'}`}
+                                ${isDeleted   ? 'opacity-30 border-red-300'   :
+                                  isPromoted  ? 'border-green-500 border-2'   :
+                                                'border-green-200'}`}
                             />
-                            {/* * genus badge on saved genus-level images */}
+                            {/* * genus badge */}
                             {isGenusMatch && !isDeleted && (
                               <span className="absolute bottom-1 left-1 text-[9px] font-semibold
                                                bg-amber-500 text-white px-1.5 py-0.5 rounded leading-none">
                                 * genus
                               </span>
                             )}
-                            {/* Delete overlay + button when NOT yet deleted */}
+                            {/* 📌 Profile pic badge when promoted */}
+                            {isPromoted && !isDeleted && (
+                              <span className="absolute bottom-1 left-1 text-[9px] font-semibold
+                                               bg-green-600 text-white px-1.5 py-0.5 rounded leading-none">
+                                📌 Profile pic
+                              </span>
+                            )}
+                            {/* Delete button */}
                             {!isDeleted && (
                               <button
                                 type="button"
@@ -1193,7 +1331,7 @@ export default function EditSpeciesForm({
                                 🗑
                               </button>
                             )}
-                            {/* "Will be deleted" banner + undo when marked deleted */}
+                            {/* "Will be deleted" banner + undo */}
                             {isDeleted && (
                               <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-red-50/60">
                                 <p className="text-[9px] font-semibold text-red-600 text-center leading-tight px-1">
@@ -1215,6 +1353,20 @@ export default function EditSpeciesForm({
                               {img.attr.replace(' · genus match', '')}
                             </p>
                           )}
+                          {/* Mark as profile pic — only when no main photo exists */}
+                          {noMainPhoto && !isDeleted && (
+                            <button
+                              type="button"
+                              onClick={() => setPromotedToMain(isPromoted ? null : { url: img.url!, attr: img.attr ?? null })}
+                              className={`text-[10px] w-full text-center rounded px-1 py-0.5 border transition-colors ${
+                                isPromoted
+                                  ? 'bg-green-100 text-green-700 border-green-300'
+                                  : 'text-gray-400 border-gray-200 hover:text-green-700 hover:border-green-300'
+                              }`}
+                            >
+                              {isPromoted ? '✓ Profile pic · undo' : '📌 Use as main'}
+                            </button>
+                          )}
                         </div>
                       )
                     })}
@@ -1225,12 +1377,17 @@ export default function EditSpeciesForm({
                 {hasFetched && (
                   <div className="flex gap-2 flex-wrap">
                     {fetchedImgs.map(img => {
-                      const isGenusMatch = img.attribution.includes('· genus match')
+                      const isGenusMatch  = img.attribution.includes('· genus match')
+                      const isPromoted    = promotedToMain?.url === img.url
+                      const noMainPhoto   = !previewUrl && !newImageBase64
                       return (
                         <div key={img.url} className="space-y-0.5 relative group">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={img.url} alt={cat}
-                            className="h-24 w-32 object-cover rounded-lg border border-blue-200" />
+                            className={`h-24 w-32 object-cover rounded-lg border ${
+                              isPromoted ? 'border-green-500 border-2' : 'border-blue-200'
+                            }`}
+                          />
                           {/* × reject this image */}
                           <button
                             type="button"
@@ -1242,17 +1399,38 @@ export default function EditSpeciesForm({
                           >
                             ×
                           </button>
-                          {/* * genus badge — shown when image is from a genus-level fallback */}
+                          {/* * genus badge */}
                           {isGenusMatch && (
                             <span className="absolute bottom-1 left-1 text-[9px] font-semibold
                                              bg-amber-500 text-white px-1.5 py-0.5 rounded leading-none">
                               * genus
                             </span>
                           )}
+                          {/* 📌 Profile pic badge when promoted */}
+                          {isPromoted && (
+                            <span className="absolute bottom-1 left-1 text-[9px] font-semibold
+                                             bg-green-600 text-white px-1.5 py-0.5 rounded leading-none">
+                              📌 Profile pic
+                            </span>
+                          )}
                           <p className="text-[10px] text-gray-400 max-w-[128px] truncate"
                             title={img.attribution}>
                             {img.attribution.replace(' · genus match', '')}
                           </p>
+                          {/* Mark as profile pic — only when no main photo exists */}
+                          {noMainPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setPromotedToMain(isPromoted ? null : { url: img.url, attr: img.attribution ?? null })}
+                              className={`text-[10px] w-full text-center rounded px-1 py-0.5 border transition-colors ${
+                                isPromoted
+                                  ? 'bg-green-100 text-green-700 border-green-300'
+                                  : 'text-gray-400 border-gray-200 hover:text-green-700 hover:border-green-300'
+                              }`}
+                            >
+                              {isPromoted ? '✓ Profile pic · undo' : '📌 Use as main'}
+                            </button>
+                          )}
                         </div>
                       )
                     })}
