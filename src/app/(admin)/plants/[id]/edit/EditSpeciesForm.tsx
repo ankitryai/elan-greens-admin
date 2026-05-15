@@ -345,49 +345,46 @@ export default function EditSpeciesForm({
     toast.success(onlyEmpty ? 'Empty fields filled from Plant.id ✓' : 'All fields overwritten from Plant.id ✓')
   }
 
-  // ── Sub-image fetch ────────────────────────────────────────────────────────
-  // Always fetches all 5 categories — no pre-save skip optimisation.
-  // buildSubImageFields already ensures empty Wikimedia results don't null-out
-  // existing DB images on save.
-  // overrideName: pass an identified botanical name from Plant.id before it's
-  //   been saved to the form, so Wikimedia can use it immediately.
-  async function handleFetchSubImages(overrideName?: string) {
-    const botanicalName = overrideName ?? watch('botanical_name') ?? species.botanical_name ?? ''
-    const commonName    = species.common_name
-
-    if (!botanicalName && !commonName) {
-      toast.warning('Fill in the botanical or common name first so Wikimedia knows what to search for.')
-      return
-    }
-
-    const filledCatsNow = filledCategories(species)
-    let msg = `Fetch sub-images for "${commonName}" from Wikimedia Commons?`
-    if (filledCatsNow.length > 0) {
-      msg += `\n\nNote: ${filledCatsNow.join(', ')} already have saved images. New results will replace them on Save.`
-    }
-    if (!window.confirm(msg)) return
-
+  // ── Shared image-fetch core ───────────────────────────────────────────────
+  // Single implementation used by both the "Populate from Name" button and the
+  // standalone "Fetch Images" button. Ensures _debug is always saved so
+  // genus-match warnings display consistently regardless of which path called.
+  async function applyImageFetch(botanicalName: string, commonName: string): Promise<number> {
     const params = new URLSearchParams()
     if (botanicalName) params.set('name', botanicalName)
     if (commonName)    params.set('common', commonName)
 
+    const res = await fetch(`/api/fetch-images?${params}`)
+    if (!res.ok) throw new Error('Image fetch failed')
+
+    const raw = await res.json() as Record<string, unknown>
+    // Separate _debug before sanitising so genus-match warnings always work
+    const { _debug, ...rest } = raw
+    const imgs = sanitiseSubImages(rest)
+    setFetchedSubImages(imgs)
+    if (_debug && typeof _debug === 'object') setFetchDebug(_debug as Record<string, FetchDebug>)
+    return Object.values(imgs).flat().length
+  }
+
+  // ── Sub-image fetch (images only — no confirm dialog) ────────────────────
+  // overrideName: botanical name from Plant.id identification before form save
+  async function handleFetchSubImages(overrideName?: string) {
+    const botanicalName = overrideName ?? watch('botanical_name') ?? species.botanical_name ?? ''
+    const commonName    = species.common_name
+    if (!botanicalName && !commonName) {
+      toast.warning('Fill in the botanical or common name first.')
+      return
+    }
     setFetchingSubImages(true)
     try {
-      const res = await fetch(`/api/fetch-images?${params}`)
-      if (!res.ok) throw new Error('Wikimedia fetch failed')
-      const raw = await res.json() as SubImages & { _debug?: Record<string, FetchDebug> }
-      const { _debug, ...images } = raw
-      const data = images as SubImages
-      setFetchedSubImages(data)
-      if (_debug) setFetchDebug(_debug)
-      const total = Object.values(data).flat().length
+      const total = await applyImageFetch(botanicalName, commonName)
       if (total === 0) {
-        toast.warning('No images found on Wikimedia for this plant. Wikimedia coverage varies — try again later or add images manually.')
+        toast.warning('No images found — Wikimedia coverage varies. Try again later or add URLs manually.')
       } else {
         toast.success(`${total} image${total !== 1 ? 's' : ''} fetched — review below, then Save Changes`)
       }
     } catch (err) {
-      setServerError(`Sub-image fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
+      setServerError(`Image fetch failed: ${err instanceof Error ? err.message : 'Try again'}`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setFetchingSubImages(false)
@@ -444,9 +441,10 @@ export default function EditSpeciesForm({
     setEnrichmentPreview(null)
   }
 
-  // ── Populate all fields from botanical name (enrichment + images combined) ──
-  // Same one-click shortcut as the Add page — fires GBIF/POWO/iNat/IUCN and
-  // Wikimedia in parallel. Useful for legacy plants that only have a name saved.
+  // ── Populate from Name — enrichment + images in one click ────────────────
+  // Primary shortcut for legacy plants with only a name. Fires all free APIs
+  // in parallel; only fills fields that are currently empty; sets fetchDebug
+  // so genus-match warnings display correctly (same as standalone image fetch).
   async function handlePopulateFromName() {
     const botanical = (watch('botanical_name') ?? species.botanical_name ?? '').trim()
     if (!botanical) {
@@ -456,38 +454,33 @@ export default function EditSpeciesForm({
     setPopulatingFromName(true)
     setPopulateStatus('Fetching from GBIF · POWO · iNaturalist · IUCN · Wikimedia…')
     try {
-      const [enrichRes, imagesRes] = await Promise.all([
+      const [enrichRes, imageCount] = await Promise.all([
         fetch(`/api/fetch-enrichment?name=${encodeURIComponent(botanical)}`),
-        fetch(`/api/fetch-images?name=${encodeURIComponent(botanical)}&common=${encodeURIComponent(species.common_name)}`),
+        applyImageFetch(botanical, species.common_name),  // shared core — sets fetchedSubImages + fetchDebug
       ])
       const filled: string[] = []
 
       if (enrichRes.ok) {
         const e = await enrichRes.json() as EnrichmentResult
-        const set = (field: keyof PlantSpeciesFormData, value: unknown) => {
-          if (value === null || value === undefined || value === '') return
+        const setIfEmpty = (field: keyof PlantSpeciesFormData, value: unknown): boolean => {
+          if (value === null || value === undefined || value === '') return false
           const current = (watch(field) ?? '') as string
-          if (!current.toString().trim()) { setValue(field, value as never); return true }
-          return false
+          if (current.toString().trim()) return false
+          setValue(field, value as never)
+          return true
         }
-        if (set('foliage_type',        e.foliage_type))        filled.push('Foliage')
-        if (set('conservation_status', e.conservation_status)) filled.push('Conservation')
-        if (e.observations_count != null) {
-          const cur = watch('observations_count')
-          if (!cur) { setValue('observations_count', e.observations_count); filled.push('iNat Observations') }
+        if (setIfEmpty('foliage_type',        e.foliage_type))        filled.push('Foliage')
+        if (setIfEmpty('conservation_status', e.conservation_status)) filled.push('Conservation')
+        if (e.observations_count != null && !watch('observations_count')) {
+          setValue('observations_count', e.observations_count)
+          filled.push('iNat Observations')
         }
-        if (set('growth_rate',         e.growth_rate))         filled.push('Growth Rate')
-        if (set('propagation_methods', e.propagation_methods)) filled.push('Propagation')
-        if (set('habitat_type',        e.habitat_type))        filled.push('Habitat')
+        if (setIfEmpty('growth_rate',         e.growth_rate))         filled.push('Growth Rate')
+        if (setIfEmpty('propagation_methods', e.propagation_methods)) filled.push('Propagation')
+        if (setIfEmpty('habitat_type',        e.habitat_type))        filled.push('Habitat')
       }
 
-      if (imagesRes.ok) {
-        const imgs = sanitiseSubImages(await imagesRes.json() as Record<string, unknown>)
-        if (hasAnySubImages(imgs)) {
-          setFetchedSubImages(imgs)
-          filled.push('Images')
-        }
-      }
+      if (imageCount > 0) filled.push(`${imageCount} Images`)
 
       setPopulateStatus(
         filled.length > 0
@@ -1190,10 +1183,15 @@ export default function EditSpeciesForm({
         {/* ── Sub-images ───────────────────────────────────────────────────── */}
         <section className="space-y-4">
           <div className="flex items-center justify-between border-b pb-2">
-            <h2 className="text-base font-semibold text-gray-700">Sub-Images</h2>
+            <div>
+              <h2 className="text-base font-semibold text-gray-700">Sub-Images</h2>
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                Use <span className="font-medium text-green-700">🌿 Populate from Name</span> above to fetch images + enrichment together
+              </p>
+            </div>
             <Button type="button" variant="outline" disabled={fetchingSubImages}
               onClick={() => handleFetchSubImages()} className="text-xs">
-              {fetchingSubImages ? 'Fetching…' : fetchedSubImages ? '🔄 Re-fetch' : '🌐 Fetch sub-images'}
+              {fetchingSubImages ? '⏳ Fetching…' : fetchedSubImages ? '🔄 Re-fetch images' : '🖼 Fetch images only'}
             </Button>
           </div>
 
