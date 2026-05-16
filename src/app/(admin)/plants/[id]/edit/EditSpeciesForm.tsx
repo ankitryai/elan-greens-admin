@@ -502,18 +502,26 @@ export default function EditSpeciesForm({
     setDeletedSaved(prev => { const n = new Set(prev); n.delete(`${cat}_${slot}`); return n })
   }
 
-  // ── Reject individual fetched images (or whole category) ──────────────────
+  // ── Reject / move fetched images ─────────────────────────────────────────
   function rejectFetchedImage(cat: keyof SubImages, url: string) {
-    setFetchedSubImages(prev => {
-      if (!prev) return prev
-      const updated = { ...prev, [cat]: prev[cat].filter(img => img.url !== url) }
-      return updated
-    })
+    setFetchedSubImages(prev => prev
+      ? { ...prev, [cat]: prev[cat].filter(img => img.url !== url) }
+      : prev
+    )
   }
   function rejectAllFetched(cat: keyof SubImages) {
+    setFetchedSubImages(prev => prev ? { ...prev, [cat]: [] } : prev)
+  }
+  function moveFetchedImage(fromCat: keyof SubImages, toCat: keyof SubImages, url: string) {
     setFetchedSubImages(prev => {
       if (!prev) return prev
-      return { ...prev, [cat]: [] }
+      const img = prev[fromCat].find(i => i.url === url)
+      if (!img) return prev
+      return {
+        ...prev,
+        [fromCat]: prev[fromCat].filter(i => i.url !== url),
+        [toCat]:   [...prev[toCat], img],
+      }
     })
   }
 
@@ -1415,6 +1423,22 @@ export default function EditSpeciesForm({
                             title={img.attribution}>
                             {img.attribution.replace(' · genus match', '')}
                           </p>
+                          {/* Move to another category */}
+                          <select
+                            value={cat}
+                            onChange={e => {
+                              const toCat = e.target.value as keyof SubImages
+                              if (toCat !== cat) moveFetchedImage(cat as keyof SubImages, toCat, img.url)
+                            }}
+                            className="text-[10px] w-full border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-500"
+                            title="Move to a different category"
+                          >
+                            {(['flowers','fruits','leaves','bark','roots'] as const).map(k => (
+                              <option key={k} value={k}>
+                                {k === cat ? `📂 ${k}` : `→ ${k}`}
+                              </option>
+                            ))}
+                          </select>
                           {/* Mark as profile pic — only when no main photo exists */}
                           {noMainPhoto && (
                             <button

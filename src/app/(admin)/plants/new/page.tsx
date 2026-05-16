@@ -21,7 +21,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import type { EnrichmentResult } from '@/types'
+import type { EnrichmentResult, WikimediaImage } from '@/types'
+import type { ImagePartKey } from '@/lib/subImageHelpers'
 const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
 const HEIGHTS    = ['Short','Medium','Tall'] as const
 const FLOWERING  = ['Flowering','Non-Flowering'] as const
@@ -54,6 +55,27 @@ export default function AddSpeciesPage() {
     const derived = botanical.split(/\s+/)[0].replace(/^[×xX]/i, '').trim()
     if (derived.length > 1) setValue('genus', derived)
   }, [watchedBotanical]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Sub-image reject / move handlers ─────────────────────────────────────
+  function rejectImage(cat: ImagePartKey, url: string) {
+    setSubImages(prev => prev
+      ? { ...prev, [cat]: prev[cat].filter(img => img.url !== url) }
+      : prev
+    )
+  }
+  function rejectAllInCat(cat: ImagePartKey) {
+    setSubImages(prev => prev ? { ...prev, [cat]: [] } : prev)
+  }
+  function moveImage(fromCat: ImagePartKey, toCat: ImagePartKey, img: WikimediaImage) {
+    setSubImages(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        [fromCat]: prev[fromCat].filter(i => i.url !== img.url),
+        [toCat]:   [...prev[toCat], img],
+      }
+    })
+  }
 
   // Called by ImageUploader after identification — pre-fills form fields.
   function handleIdentified(result: IdentificationResult) {
@@ -408,7 +430,12 @@ export default function AddSpeciesPage() {
               5. Auto-fetched Images (from Wikimedia Commons)
             </h2>
             <p className="text-xs text-gray-500">Review each image. They will be saved with the species.</p>
-            <SubImagePreview subImages={subImages} />
+            <SubImagePreview
+              subImages={subImages}
+              onRejectImage={rejectImage}
+              onRejectAll={rejectAllInCat}
+              onMoveImage={moveImage}
+            />
           </section>
         )}
 
@@ -470,25 +497,79 @@ function CharCountTextarea({
   )
 }
 
-function SubImagePreview({ subImages }: { subImages: SubImages }) {
+function SubImagePreview({
+  subImages,
+  onRejectImage,
+  onRejectAll,
+  onMoveImage,
+}: {
+  subImages: SubImages
+  onRejectImage: (cat: ImagePartKey, url: string) => void
+  onRejectAll:   (cat: ImagePartKey) => void
+  onMoveImage:   (fromCat: ImagePartKey, toCat: ImagePartKey, img: WikimediaImage) => void
+}) {
   return (
     <div className="space-y-3">
       {IMAGE_PART_KEYS.map(cat => {
         const images = subImages[cat]
         return (
           <div key={cat}>
-            <p className="text-xs font-medium text-gray-600 capitalize mb-1">{cat}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{cat}</p>
+              {images.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onRejectAll(cat)}
+                  className="text-[10px] text-red-500 hover:text-red-700 border border-red-200 rounded px-1.5 py-0.5 leading-none"
+                >
+                  ✕ Reject all
+                </button>
+              )}
+            </div>
             {images.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">No images found on Wikimedia for this category.</p>
+              <p className="text-xs text-gray-400 italic">No images found for this category.</p>
             ) : (
               <div className="flex gap-2 flex-wrap">
                 {images.map(img => (
-                  <div key={img.url} className="space-y-1">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.url} alt={`${cat} photo`} className="h-24 w-32 object-cover rounded border" />
-                    <p className="text-xs text-gray-400 max-w-[128px] truncate" title={img.attribution}>
+                  <div key={img.url} className="space-y-0.5">
+                    <div className="relative group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.url}
+                        alt={`${cat} photo`}
+                        className="h-24 w-32 object-cover rounded-lg border border-blue-200"
+                      />
+                      {/* × reject button */}
+                      <button
+                        type="button"
+                        onClick={() => onRejectImage(cat, img.url)}
+                        className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center
+                                   bg-red-500 text-white rounded-full text-[11px] leading-none
+                                   opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                        title="Remove this image"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-400 max-w-[128px] truncate" title={img.attribution}>
                       {img.attribution}
                     </p>
+                    {/* Move to another category */}
+                    <select
+                      value={cat}
+                      onChange={e => {
+                        const toCat = e.target.value as ImagePartKey
+                        if (toCat !== cat) onMoveImage(cat, toCat, img)
+                      }}
+                      className="text-[10px] w-full border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-500"
+                      title="Move to a different category"
+                    >
+                      {IMAGE_PART_KEYS.map(k => (
+                        <option key={k} value={k}>
+                          {k === cat ? `📂 ${k}` : `→ ${k}`}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 ))}
               </div>
@@ -496,6 +577,9 @@ function SubImagePreview({ subImages }: { subImages: SubImages }) {
           </div>
         )
       })}
+      <p className="text-xs text-amber-600 border-t pt-2">
+        ↑ Blue-bordered images will be saved. Hover to remove · use the dropdown to move to the correct category.
+      </p>
     </div>
   )
 }
