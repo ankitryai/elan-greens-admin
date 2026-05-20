@@ -184,6 +184,17 @@ export interface AppSetting {
   updated_at:  string
 }
 
+// ── News Topic Queries (news_topic_queries table) ─────────────────────────────
+export interface NewsTopicQuery {
+  id:         string
+  query_text: string   // e.g. "Bengaluru landscaping"
+  chip_label: string   // e.g. "Green Bengaluru"
+  chip_icon:  string   // e.g. "🌳"
+  enabled:    boolean
+  priority:   number   // higher = runs first (0–10)
+  created_at: string
+}
+
 // ── Fetch-images debug provenance ─────────────────────────────────────────────
 // Returned alongside image results — defined here so client components can
 // import it without pulling in the server-only fetch-images route module.

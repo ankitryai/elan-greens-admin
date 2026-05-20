@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -369,4 +369,44 @@ export async function updateAppSetting(key: string, value: string): Promise<void
     .update({ value, updated_at: new Date().toISOString() })
     .eq('key', key)
   if (error) throw new Error(`Failed to update setting "${key}": ${error.message}`)
+}
+
+// ── NEWS TOPIC QUERIES ─────────────────────────────────────────────────────────
+
+export async function getNewsTopicQueries(): Promise<NewsTopicQuery[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('news_topic_queries')
+    .select('*')
+    .order('priority', { ascending: false })
+  if (error) throw new Error(`Failed to load topic queries: ${error.message}`)
+  return data as NewsTopicQuery[]
+}
+
+export async function addNewsTopicQuery(
+  query_text: string,
+  chip_label: string,
+  chip_icon: string,
+  priority: number,
+): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db
+    .from('news_topic_queries')
+    .insert({ query_text: query_text.trim(), chip_label: chip_label.trim(), chip_icon: chip_icon.trim(), priority })
+  if (error) throw new Error(`Failed to add topic query: ${error.message}`)
+}
+
+export async function updateNewsTopicQuery(
+  id: string,
+  fields: Partial<Pick<NewsTopicQuery, 'enabled' | 'priority' | 'chip_label' | 'chip_icon' | 'query_text'>>,
+): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db.from('news_topic_queries').update(fields).eq('id', id)
+  if (error) throw new Error(`Failed to update topic query: ${error.message}`)
+}
+
+export async function deleteNewsTopicQuery(id: string): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db.from('news_topic_queries').delete().eq('id', id)
+  if (error) throw new Error(`Failed to delete topic query: ${error.message}`)
 }

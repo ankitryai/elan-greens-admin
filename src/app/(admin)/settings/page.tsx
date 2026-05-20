@@ -1,9 +1,10 @@
 // =============================================================================
 // Admin — News & App Settings
 //
-// Two sections:
-//   1. News Sources  — whitelist of domains; add, toggle, reprioritise, delete
-//   2. News Settings — numeric tuneable knobs (max articles, plant tags etc.)
+// Three sections:
+//   1. News Sources      — whitelist of domains; add, toggle, reprioritise, delete
+//   2. News Settings     — numeric tuneable knobs (max articles, plant tags etc.)
+//   3. Topic Queries     — admin-configurable RSS search queries for community topics
 //
 // All mutations use Server Actions (no API routes needed — admin-only, simple).
 // =============================================================================
@@ -12,17 +13,22 @@ import { revalidatePath } from 'next/cache'
 import {
   getNewsSources,
   getAppSettings,
+  getNewsTopicQueries,
   addNewsSource,
   updateNewsSource,
   deleteNewsSource,
   updateAppSetting,
+  addNewsTopicQuery,
+  updateNewsTopicQuery,
+  deleteNewsTopicQuery,
 } from '@/lib/queries'
-import type { NewsSource, AppSetting } from '@/types'
+import type { NewsSource, AppSetting, NewsTopicQuery } from '@/types'
 
 export default async function SettingsPage() {
-  const [sources, settings] = await Promise.all([
+  const [sources, settings, topicQueries] = await Promise.all([
     getNewsSources(),
     getAppSettings(),
+    getNewsTopicQueries(),
   ])
 
   // ── Server Actions ────────────────────────────────────────────────────────
@@ -68,6 +74,42 @@ export default async function SettingsPage() {
     const value = (formData.get('value') as string ?? '').trim()
     if (!key || !value) return
     await updateAppSetting(key, value)
+    revalidatePath('/settings')
+  }
+
+  async function addTopicQueryAction(formData: FormData) {
+    'use server'
+    const query_text = (formData.get('query_text') as string ?? '').trim()
+    const chip_label = (formData.get('chip_label') as string ?? '').trim()
+    const chip_icon  = (formData.get('chip_icon')  as string ?? '🌳').trim()
+    const priority   = parseInt(formData.get('priority') as string ?? '5', 10)
+    if (!query_text || !chip_label) return
+    try {
+      await addNewsTopicQuery(query_text, chip_label, chip_icon, priority)
+    } catch { /* silently ignore */ }
+    revalidatePath('/settings')
+  }
+
+  async function toggleTopicAction(formData: FormData) {
+    'use server'
+    const id      = formData.get('id')      as string
+    const enabled = formData.get('enabled') === 'true'
+    await updateNewsTopicQuery(id, { enabled: !enabled })
+    revalidatePath('/settings')
+  }
+
+  async function setTopicPriorityAction(formData: FormData) {
+    'use server'
+    const id       = formData.get('id')       as string
+    const priority = parseInt(formData.get('priority') as string ?? '5', 10)
+    await updateNewsTopicQuery(id, { priority })
+    revalidatePath('/settings')
+  }
+
+  async function deleteTopicQueryAction(formData: FormData) {
+    'use server'
+    const id = formData.get('id') as string
+    await deleteNewsTopicQuery(id)
     revalidatePath('/settings')
   }
 
@@ -170,6 +212,80 @@ export default async function SettingsPage() {
         </div>
       </section>
 
+      {/* ── Section 3: Topic Queries ── */}
+      <section className="space-y-4">
+        <div className="border-b border-gray-200 pb-2">
+          <h2 className="text-lg font-semibold text-gray-800">Topic Queries</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Community / landscaping search terms for the News feed. When an article matches
+            a query but no garden plant, the chip label is shown instead.
+            Priority 0–10 (higher = runs first).
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {topicQueries.length === 0 && (
+            <p className="text-sm text-gray-400 py-4 text-center">
+              No topic queries yet — run <code className="bg-gray-100 px-1 rounded text-xs">supabase-news-update-2.sql</code> to seed defaults, or add one below.
+            </p>
+          )}
+          {topicQueries.map(tq => (
+            <TopicQueryRow
+              key={tq.id}
+              query={tq}
+              toggleAction={toggleTopicAction}
+              setPriorityAction={setTopicPriorityAction}
+              deleteAction={deleteTopicQueryAction}
+            />
+          ))}
+        </div>
+
+        {/* Add topic query form */}
+        <div className="bg-blue-50 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-blue-800">Add a topic query</p>
+          <form action={addTopicQueryAction} className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                name="query_text"
+                required
+                placeholder='Search query, e.g. "Bengaluru landscaping"'
+                className="sm:col-span-2 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <input
+                name="chip_label"
+                required
+                placeholder="Chip label, e.g. Green Bengaluru"
+                className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <div className="flex gap-2">
+                <input
+                  name="chip_icon"
+                  placeholder="Icon, e.g. 🌳"
+                  defaultValue="🌳"
+                  maxLength={4}
+                  className="w-20 text-center px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                <input
+                  name="priority"
+                  type="number"
+                  min={0}
+                  max={10}
+                  defaultValue={5}
+                  placeholder="Pri"
+                  className="w-16 text-center px-2 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800 transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </section>
+
     </div>
   )
 }
@@ -249,6 +365,98 @@ function SourceRow({
           title="Remove this source"
           onClick={e => {
             if (!confirm(`Remove "${source.label}" from the whitelist?`)) e.preventDefault()
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+            strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden>
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// ── TopicQueryRow — one editable row in the topic queries table ──────────────
+function TopicQueryRow({
+  query,
+  toggleAction,
+  setPriorityAction,
+  deleteAction,
+}: {
+  query: NewsTopicQuery
+  toggleAction: (fd: FormData) => Promise<void>
+  setPriorityAction: (fd: FormData) => Promise<void>
+  deleteAction: (fd: FormData) => Promise<void>
+}) {
+  return (
+    <div
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+        query.enabled
+          ? 'bg-white border-gray-200'
+          : 'bg-gray-50 border-gray-100 opacity-60'
+      }`}
+    >
+      {/* Enabled toggle */}
+      <form action={toggleAction}>
+        <input type="hidden" name="id"      value={query.id} />
+        <input type="hidden" name="enabled" value={String(query.enabled)} />
+        <button
+          type="submit"
+          title={query.enabled ? 'Disable this query' : 'Enable this query'}
+          className={`w-10 h-6 rounded-full relative transition-colors shrink-0 ${
+            query.enabled ? 'bg-blue-600' : 'bg-gray-300'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+              query.enabled ? 'translate-x-4 left-0.5' : 'translate-x-0 left-0.5'
+            }`}
+          />
+        </button>
+      </form>
+
+      {/* Chip icon */}
+      <span className="text-lg shrink-0" aria-hidden>{query.chip_icon}</span>
+
+      {/* Query text + chip label */}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-900 truncate font-mono">{query.query_text}</p>
+        <p className="text-xs text-gray-400 truncate">chip: {query.chip_label}</p>
+      </div>
+
+      {/* Priority spinner */}
+      <form action={setPriorityAction} className="flex items-center gap-1 shrink-0">
+        <input type="hidden" name="id" value={query.id} />
+        <input
+          name="priority"
+          type="number"
+          min={0}
+          max={10}
+          defaultValue={query.priority}
+          className="w-14 text-center px-2 py-1 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        <button
+          type="submit"
+          className="text-xs text-blue-700 hover:text-blue-900 px-1 py-1 transition-colors"
+          title="Save priority"
+        >
+          ✓
+        </button>
+      </form>
+
+      {/* Delete */}
+      <form action={deleteAction}>
+        <input type="hidden" name="id" value={query.id} />
+        <button
+          type="submit"
+          className="text-gray-300 hover:text-red-500 transition-colors p-1"
+          title="Remove this query"
+          onClick={e => {
+            if (!confirm(`Remove query "${query.query_text}"?`)) e.preventDefault()
           }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
