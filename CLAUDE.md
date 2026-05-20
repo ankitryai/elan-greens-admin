@@ -17,9 +17,9 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 npm run dev
 # Production build (always run before deploying)
 NODE_TLS_REJECT_UNAUTHORIZED=0 npm run build
 
-# Deploy to Vercel production (CLI — do NOT use "Redeploy" in Vercel dashboard;
-# that re-runs the old build and doesn't pick up new commits)
-NODE_TLS_REJECT_UNAUTHORIZED=0 vercel --prod
+# Deploy — Vercel CLI is blocked on corporate network; push to GitHub instead
+git push origin main   # triggers Vercel auto-deploy via GitHub integration
+# Do NOT use the Vercel dashboard "Redeploy" button — it re-runs the old build
 
 # Tests — ALWAYS run before committing; all tests must pass
 npm test                  # run all Vitest tests once
@@ -93,7 +93,7 @@ Google OAuth via Supabase. Route protection is in `src/proxy.ts` (the middleware
 
 | What | Where |
 |---|---|
-| All shared interfaces (`PlantSpecies`, `EnrichmentResult`, `FetchDebug`, etc.) | `src/types/index.ts` |
+| All shared interfaces (`PlantSpecies`, `EnrichmentResult`, `FetchDebug`, `NewsSource`, `NewsTopicQuery`, etc.) | `src/types/index.ts` |
 | API route files | May `import type { X } from '@/types'` and `export type { X }` for callers that import from the route — never define types inline in route files |
 | `'use client'` components | Import types from `@/types` only — **never** from `@/app/api/*/route.ts` |
 
@@ -103,6 +103,40 @@ Google OAuth via Supabase. Route protection is in `src/proxy.ts` (the middleware
 `src/app/(admin)/error.tsx` catches any runtime JS crash in an admin page and renders a red recovery UI with the error message, an Error ID, and "Try again / Back to Plants" buttons. This replaced the blank browser error screen.
 
 Pattern: Next.js `error.tsx` files must be `'use client'` and receive `{ error, reset }` props.
+
+### Settings page — `src/app/(admin)/settings/page.tsx`
+Three sections, all using Server Actions (no API routes needed):
+
+**Section 1 — News Sources** (`news_sources` table)
+- Domain whitelist for the public news feed
+- Toggle enabled/disabled, set priority 0–10, delete, add new
+- `SourceRow` sub-component handles one row
+
+**Section 2 — News Settings** (`app_settings` table)
+- Numeric knobs: max articles, plant tags, plants queried, per-plant cap, max age days, cache hours
+- `SettingRow` sub-component handles one row
+
+**Section 3 — Topic Queries** (`news_topic_queries` table)
+- Admin-configurable RSS search terms for community/landscaping topics
+- Each row: `query_text` (RSS search string), `chip_label`, `chip_icon`, `enabled`, `priority`
+- Toggle, set priority, delete, add new
+- `TopicQueryRow` sub-component handles one row
+- Blue-tinted add form (vs green for news sources) to distinguish the two sections visually
+
+**Server Actions pattern** — all mutations inline in the page file, no separate API routes:
+```tsx
+async function myAction(formData: FormData) {
+  'use server'
+  const value = formData.get('field') as string
+  await someQueryFn(value)
+  revalidatePath('/settings')
+}
+```
+
+**Query functions** for settings are in `src/lib/queries.ts`:
+- `getNewsSources` / `addNewsSource` / `updateNewsSource` / `deleteNewsSource`
+- `getAppSettings` / `updateAppSetting`
+- `getNewsTopicQueries` / `addNewsTopicQuery` / `updateNewsTopicQuery` / `deleteNewsTopicQuery`
 
 ### Sub-image pipeline (fetch → review → save)
 
@@ -244,6 +278,17 @@ Two public buckets must exist:
 
 Both must be set to **Public** in Supabase dashboard. Service role client is used for uploads (bypasses RLS).
 
+### Supabase tables managed by admin app
+| Table | RLS read | Admin writes via |
+|---|---|---|
+| `plant_species` | anon SELECT (active only) | API routes (`/api/plants`) |
+| `plant_instances` | anon SELECT | API routes |
+| `staff_data` | anon SELECT | API routes |
+| `plant_species_links` | anon SELECT | API routes |
+| `news_sources` | anon SELECT | Settings page Server Actions |
+| `app_settings` | anon SELECT | Settings page Server Actions |
+| `news_topic_queries` | anon SELECT | Settings page Server Actions |
+
 ---
 
 ## Environment variables
@@ -263,7 +308,7 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 
 ## Key lessons learned (do not repeat these mistakes)
 
-1. **Vercel "Redeploy" button re-runs the previous build** — it does NOT pick up new Git commits. Always deploy via `vercel --prod` CLI or let GitHub auto-deploy trigger.
+1. **Vercel "Redeploy" button re-runs the previous build** — it does NOT pick up new Git commits. Always deploy via `git push origin main` and let Vercel auto-deploy from the GitHub integration. The `vercel --prod` CLI is also blocked on the corporate network.
 
 2. **`getAllSpecies` in the admin app fetches ALL species** including tentative/inactive. The public app's `getAllSpecies` filters to `active=true` only — different behaviour.
 
@@ -290,3 +335,11 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 13. **Local `npm run build` fails on corporate network** (Google Fonts fetch timeout). This is expected — do not attempt to fix it. Vercel builds succeed because it has unrestricted network access. Run `npm test` locally instead to verify correctness before pushing.
 
 14. **Plant.id has 100 LIFETIME credits, not monthly** — they never reset. Never auto-fire the Plant.id API. Always require an explicit admin click. Google Vision (1 000/month, renews) is the auto-firing fallback.
+
+15. **Server Actions are the right pattern for simple admin mutations** — the Settings page uses Server Actions inline (no API routes) for all CRUD on `news_sources`, `app_settings`, `news_topic_queries`. This avoids the overhead of API routes + fetch calls for admin-only forms where auth is already guaranteed by the middleware. Always call `revalidatePath('/settings')` at the end of each action to refresh the page.
+
+16. **Adding a new admin-configurable table** — the pattern is:
+    1. Add TypeScript interface to `src/types/index.ts`
+    2. Add CRUD functions to `src/lib/queries.ts` (import the new type there)
+    3. Add section to `src/app/(admin)/settings/page.tsx` with Server Actions + a `XxxRow` sub-component
+    4. Write the SQL migration file in the `elan-greens` repo root and instruct user to run it in Supabase SQL Editor
