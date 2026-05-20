@@ -25,10 +25,12 @@ import {
 import type { NewsSource, AppSetting, NewsTopicQuery } from '@/types'
 
 export default async function SettingsPage() {
+  // Each fetch is wrapped individually so one missing/broken table
+  // never crashes the whole page — the affected section just shows empty.
   const [sources, settings, topicQueries] = await Promise.all([
-    getNewsSources(),
-    getAppSettings(),
-    getNewsTopicQueries(),
+    getNewsSources().catch((): NewsSource[] => []),
+    getAppSettings().catch((): AppSetting[] => []),
+    getNewsTopicQueries().catch((): NewsTopicQuery[] => []),
   ])
 
   // ── Server Actions ────────────────────────────────────────────────────────
