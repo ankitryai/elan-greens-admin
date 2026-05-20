@@ -166,6 +166,24 @@ export interface EnrichmentResult {
   }
 }
 
+// ── News Sources (news_sources table) ────────────────────────────────────────
+export interface NewsSource {
+  id:         string
+  domain:     string    // e.g. "thebetterindia.com"
+  label:      string    // e.g. "The Better India"
+  enabled:    boolean
+  priority:   number    // higher = preferred in scoring (0–10)
+  created_at: string
+}
+
+// ── App Settings (app_settings table) ────────────────────────────────────────
+export interface AppSetting {
+  key:         string
+  value:       string
+  description: string | null
+  updated_at:  string
+}
+
 // ── Fetch-images debug provenance ─────────────────────────────────────────────
 // Returned alongside image results — defined here so client components can
 // import it without pulling in the server-only fetch-images route module.

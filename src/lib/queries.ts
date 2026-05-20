@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -309,4 +309,64 @@ export async function getAllSpeciesSnippets(): Promise<SpeciesSnippet[]> {
     .order('common_name')
   if (error) throw new Error(`Failed to load species list: ${error.message}`)
   return data as SpeciesSnippet[]
+}
+
+// ── NEWS SOURCES ──────────────────────────────────────────────────────────────
+
+export async function getNewsSources(): Promise<NewsSource[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('news_sources')
+    .select('*')
+    .order('priority', { ascending: false })
+  if (error) throw new Error(`Failed to load news sources: ${error.message}`)
+  return data as NewsSource[]
+}
+
+export async function addNewsSource(
+  domain: string,
+  label: string,
+  priority: number
+): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db
+    .from('news_sources')
+    .insert({ domain: domain.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), label, priority })
+  if (error) throw new Error(`Failed to add source: ${error.message}`)
+}
+
+export async function updateNewsSource(
+  id: string,
+  fields: Partial<Pick<NewsSource, 'enabled' | 'priority' | 'label'>>
+): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db.from('news_sources').update(fields).eq('id', id)
+  if (error) throw new Error(`Failed to update source: ${error.message}`)
+}
+
+export async function deleteNewsSource(id: string): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db.from('news_sources').delete().eq('id', id)
+  if (error) throw new Error(`Failed to delete source: ${error.message}`)
+}
+
+// ── APP SETTINGS ──────────────────────────────────────────────────────────────
+
+export async function getAppSettings(): Promise<AppSetting[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('app_settings')
+    .select('*')
+    .order('key')
+  if (error) throw new Error(`Failed to load settings: ${error.message}`)
+  return data as AppSetting[]
+}
+
+export async function updateAppSetting(key: string, value: string): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db
+    .from('app_settings')
+    .update({ value, updated_at: new Date().toISOString() })
+    .eq('key', key)
+  if (error) throw new Error(`Failed to update setting "${key}": ${error.message}`)
 }

@@ -13,9 +13,10 @@ import { redirect } from 'next/navigation'
 
 // Nav items — adding a new section only requires adding one entry here.
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard',    icon: '▦' },
-  { href: '/plants',    label: 'Plants',        icon: '🌿' },
-  { href: '/staff',     label: 'Green Team',    icon: '👐' },
+  { href: '/dashboard', label: 'Dashboard',  icon: '▦'  },
+  { href: '/plants',    label: 'Plants',      icon: '🌿' },
+  { href: '/staff',     label: 'Green Team',  icon: '👐' },
+  { href: '/settings',  label: 'Settings',    icon: '⚙️' },
 ] as const
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
