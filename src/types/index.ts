@@ -203,3 +203,25 @@ export interface FetchDebug {
   query:   string          // the search query / name that produced results
   level?:  'species' | 'genus'   // iNaturalist only
 }
+
+// ── API Logs (api_logs table) ─────────────────────────────────────────────────
+export interface ApiLog {
+  id:          string
+  api_name:    string
+  endpoint:    string
+  status_code: number | null
+  duration_ms: number
+  success:     boolean
+  error_msg:   string | null
+  meta:        Record<string, string | number | null> | null
+  created_at:  string
+}
+
+export interface ApiLogStats {
+  api_name:     string
+  total_calls:  number
+  success_pct:  number   // 0–100
+  p50_ms:       number
+  p90_ms:       number
+  last_called:  string | null
+}

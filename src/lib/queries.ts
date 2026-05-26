@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery, ApiLog, ApiLogStats } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -409,4 +409,26 @@ export async function deleteNewsTopicQuery(id: string): Promise<void> {
   const db = createServiceRoleClient()
   const { error } = await db.from('news_topic_queries').delete().eq('id', id)
   if (error) throw new Error(`Failed to delete topic query: ${error.message}`)
+}
+
+// ── API LOGS ──────────────────────────────────────────────────────────────────
+
+export async function getApiLogStats(): Promise<ApiLogStats[]> {
+  const db = createServiceRoleClient()
+  // Percentile functions require a raw RPC or rpc call — use rpc for clean SQL
+  const { data, error } = await db.rpc('get_api_log_stats')
+  if (error) throw new Error(`Failed to load API log stats: ${error.message}`)
+  return (data ?? []) as ApiLogStats[]
+}
+
+export async function getApiLogs(api_name: string, limit = 50): Promise<ApiLog[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('api_logs')
+    .select('*')
+    .eq('api_name', api_name)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(`Failed to load API logs: ${error.message}`)
+  return data as ApiLog[]
 }

@@ -9,6 +9,7 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase.server'
 import { NextResponse, type NextRequest } from 'next/server'
+import { timedFetch } from '@/lib/apiLogger'
 
 interface VisionWebEntity {
   entityId: string
@@ -37,24 +38,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No image provided' }, { status: 400 })
   }
 
-  const response = await fetch(
-    `https://vision.googleapis.com/v1/images:annotate?key=${process.env.GOOGLE_VISION_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requests: [{
-          image: { content: imageBase64 },
-          // WEB_DETECTION returns matched web entities and best-guess labels.
-          features: [{ type: 'WEB_DETECTION', maxResults: 5 }],
-        }],
-      }),
-    }
+  const response = await timedFetch(
+    'google_vision',
+    'vision.googleapis.com',
+    () => fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${process.env.GOOGLE_VISION_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: imageBase64 },
+            features: [{ type: 'WEB_DETECTION', maxResults: 5 }],
+          }],
+        }),
+      }
+    )
   )
 
   if (!response.ok) {
+    const errorBody = await response.text()
+    console.error(`[vision-fallback] Google Vision API ${response.status}:`, errorBody)
     return NextResponse.json(
-      { error: `Google Vision API error: ${response.status}` },
+      { error: `Google Vision API error: ${response.status}`, detail: errorBody },
       { status: 502 }
     )
   }
