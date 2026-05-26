@@ -21,10 +21,10 @@ import {
   addNewsTopicQuery,
   updateNewsTopicQuery,
   deleteNewsTopicQuery,
+  getApiLogStats,
+  getApiLogs,
 } from '@/lib/queries'
-import type { NewsSource, AppSetting, NewsTopicQuery } from '@/types'
-import { getApiLogStats, getApiLogs } from '@/lib/queries'
-import type { ApiLogStats, ApiLog } from '@/types'
+import type { NewsSource, AppSetting, NewsTopicQuery, ApiLogStats, ApiLog } from '@/types'
 
 export default async function SettingsPage() {
   // Each fetch is wrapped individually so one missing/broken table
