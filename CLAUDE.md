@@ -39,6 +39,8 @@ Before every commit, Claude must verify all of the following. A commit that skip
 - [ ] Every `'use client'` file imports types **only from `@/types`**, never from `@/app/api/*/route.ts` or `@/lib/supabase.server.ts`
 - [ ] Run: `grep -r "from '@/app/api/" src/app/\(admin\) src/components --include="*.tsx" --include="*.ts"` — must return empty
 - [ ] Run: `grep -r "from '@/lib/supabase.server'" src/components --include="*.tsx"` — must return empty
+- [ ] **Any component with `onClick`, `onChange`, or other event handlers must be in a `'use client'` file** — even if the component is simple. Never define interactive sub-components in the same file as Server Actions (inline `'use server'`). Move them to a separate `XxxRows.tsx` / `XxxClient.tsx` with `'use client'` at the top.
+- [ ] **Never add a second `import { ... } from '@/lib/queries'` or `import type { ... } from '@/types'` line** — always extend the existing import. Duplicate imports in a file containing Server Actions break Next.js's static Server Action registration, causing a React serialisation error on the event handlers of OTHER components in the page.
 
 ### 2. API response sanitisation
 - [ ] Any function that passes external API JSON to React state goes through a sanitiser that:
@@ -52,10 +54,22 @@ Before every commit, Claude must verify all of the following. A commit that skip
 - [ ] Integer columns (`observations_count`) never receive an empty string — Postgres throws `invalid input syntax for type integer: ''`
 - [ ] `friendlyDbError()` is present in every POST/PATCH route to return human-readable error messages
 
-### 4. Tests — required for every new pure function
+### 4. Tests — required for every new pure function and API route
 Any function that:
 - Transforms API data before UI use → must have tests covering the happy path, null/empty input, and the specific crash scenario that motivated the function
 - Maps form fields to DB columns → must have tests covering all field names, null slots, and max-item limits
+
+Any new API route (or change to an existing one) → must have tests in `src/__tests__/api-routes.test.ts` covering:
+- **Auth failure** (non-superadmin → 401)
+- **Missing input** (no image / no name → 400)
+- **External API failure** (403 billing, 400 bad key, 429 quota, network timeout → 502)
+- **Success** (correct response shape)
+
+**What Vitest unit tests CANNOT catch** (requires E2E / integration tests):
+- React Server Component boundary violations (`onClick` in a Server Component file)
+- Duplicate import statements breaking Server Action static registration
+- File input not re-triggering `onChange` on retake (requires DOM simulation)
+These must be caught by the commit checklist above or by running `npm run build` and loading the page in the browser.
 
 New test files go in `src/__tests__/`. File naming: `<module>.test.ts`.
 
@@ -116,12 +130,29 @@ Three sections, all using Server Actions (no API routes needed):
 - Numeric knobs: max articles, plant tags, plants queried, per-plant cap, max age days, cache hours
 - `SettingRow` sub-component handles one row
 
+**Section 4 — API Health** (`api_logs` table)
+- Live log of every external API call (Google Vision, Plant.id, IUCN, GBIF, iNaturalist)
+- Summary stats: calls / success % / P50 / P90 latency via `get_api_log_stats()` Supabase RPC
+- Per-API collapsible log table: time, status code, duration, error message
+- Rows auto-purged after 30 days via pg_cron (`purge-api-logs-30d` job)
+- Rendered by `ApiHealthSection.tsx` — a completely separate Server Component. **Never inline this data-fetching in `page.tsx`** — mixing it with Server Action definitions breaks Next.js's static analysis (see lessons 17 and 18 below)
+
 **Section 3 — Topic Queries** (`news_topic_queries` table)
 - Admin-configurable RSS search terms for community/landscaping topics
 - Each row: `query_text` (RSS search string), `chip_label`, `chip_icon`, `enabled`, `priority`
 - Toggle, set priority, delete, add new
-- `TopicQueryRow` sub-component handles one row
+- `TopicQueryRow` sub-component handles one row — lives in `SettingsRows.tsx` (`'use client'`)
 - Blue-tinted add form (vs green for news sources) to distinguish the two sections visually
+
+**Settings page file structure — CRITICAL:**
+```
+src/app/(admin)/settings/
+  page.tsx              — Server Component + Server Actions; data fetching for sections 1–3 only
+  SettingsRows.tsx      — 'use client'; SourceRow, TopicQueryRow, SettingRow (have onClick)
+  ApiHealthSection.tsx  — isolated Server Component; fetches api_logs independently
+```
+Never add data-fetching code for new sections directly inside `page.tsx` alongside Server Actions.
+Never define components with event handlers in `page.tsx`. Both break Server Action static registration.
 
 **Server Actions pattern** — all mutations inline in the page file, no separate API routes:
 ```tsx
@@ -341,5 +372,23 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 16. **Adding a new admin-configurable table** — the pattern is:
     1. Add TypeScript interface to `src/types/index.ts`
     2. Add CRUD functions to `src/lib/queries.ts` (import the new type there)
-    3. Add section to `src/app/(admin)/settings/page.tsx` with Server Actions + a `XxxRow` sub-component
-    4. Write the SQL migration file in the `elan-greens` repo root and instruct user to run it in Supabase SQL Editor
+    3. Add section to `src/app/(admin)/settings/page.tsx` with Server Actions + a `XxxRow` sub-component in `SettingsRows.tsx`
+    4. Write the SQL migration file in `supabase/` and instruct user to run it in Supabase SQL Editor
+
+17. **Components with `onClick` must be in `'use client'` files — even simple ones.** `SourceRow`, `TopicQueryRow`, `SettingRow` had `onClick={e => confirm(...)}` on delete buttons. In a Server Component file this throws `"Event handlers cannot be passed to Client Component props"` at React serialisation time (production runtime error, NOT caught by `npm run build` or unit tests). They were moved to `SettingsRows.tsx` (`'use client'`). Server Actions can still be passed as props — they are serialisable action references.
+
+18. **Never add a duplicate import from the same module in a file with Server Actions.** A second `import { ... } from '@/lib/queries'` line breaks Next.js's static Server Action registration — the existing Server Actions in the file lose their `'use server'` status and React throws the same event-handler serialisation error. Always extend the existing import line.
+
+19. **Isolate new data-fetching sections from Server Action files.** Adding a `Promise.all(getApiLogStats(), ...)` block directly inside `SettingsPage` (which contains Server Actions) corrupted the static analysis. Pattern: create a separate `XxxSection.tsx` Server Component for any new section that needs its own data, import it as `<XxxSection />` in the page. This keeps Server Action definitions clean and isolated.
+
+20. **Vercel env var values can silently be wrong keys.** A Stripe `sk_live_...` key was saved in the `GOOGLE_VISION_API_KEY` field — Vision returned 400 on every call for months. Always verify the VALUE prefix, not just that the key name exists: Vision keys start with `AIzaSy`, Supabase JWT keys start with `eyJ`, service role keys start with `eyJ`.
+
+21. **GCP billing must be linked even for free-tier API usage.** Google Cloud Vision has 1,000 free units/month but still requires a billing account to be attached to the project. Without billing, every API call returns 403 regardless of usage. Linking a card does not charge you if you stay within the free tier.
+
+22. **API logging must use Supabase, not the filesystem.** Vercel is serverless — the filesystem is ephemeral (wiped between invocations). All persistent logging goes to the `api_logs` Supabase table via `logApiCall()` in `src/lib/apiLogger.ts`. Use `timedFetch()` to wrap any external API call — it logs timing, status, and error body automatically. pg_cron purges rows older than 30 days nightly.
+
+23. **Google Vision `WEB_DETECTION` returns generic labels, not botanical names.** For a clearly-identifiable plant like Mussaenda philippica, Vision returned "tree / Flower / Tree / M-tree". It is designed for general web image matching, not species-level classification. Use Vision's `bestGuessLabel` only as a loose hint. For accurate plant ID: Google Lens (download image → upload to lens.google.com) or Plant.id explicit button. Do NOT show Vision entity chips as "botanical name suggestions".
+
+24. **File input must be reset before retake.** Without `inputRef.current.value = ''` before calling `.click()`, selecting the same photo again (or retaking with the camera) does not fire `onChange`. Vision never re-runs. Always reset the input value in both "Take photo" and "Choose from gallery" button handlers before triggering the click.
+
+25. **pg_cron must be enabled before use.** Supabase's `cron` schema does not exist by default. Enable it via: Supabase Dashboard → Database → Extensions → search "pg_cron" → toggle On. Then `SELECT cron.schedule(...)` works. Without enabling, SQL editor throws `ERROR: 3F000: schema "cron" does not exist`.
