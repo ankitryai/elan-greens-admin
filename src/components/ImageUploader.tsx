@@ -191,6 +191,22 @@ export default function ImageUploader({
     }
   }
 
+  // ── Google Lens: download the compressed photo + open Lens upload page ──────
+  // WHY download first? Lens doesn't accept programmatic POSTs from other origins.
+  // The compressed image is already in memory — save it to Downloads, open Lens,
+  // user uploads it. On mobile Chrome this takes ~2 taps.
+  function openInGoogleLens() {
+    if (!preview) return
+    const link = document.createElement('a')
+    link.href = preview
+    link.download = 'plant-photo.jpg'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setTimeout(() => window.open('https://lens.google.com/', '_blank'), 300)
+    setStatus(prev => prev + ' · 📥 Photo saved — upload it in the Lens tab that just opened.')
+  }
+
   // ── Wikimedia sub-image fetch ─────────────────────────────────────────────
   async function fetchSubImages(botanicalName: string) {
     setStatus(prev => prev + ' Fetching plant images from Wikimedia…')
@@ -221,14 +237,26 @@ export default function ImageUploader({
         <Button
           type="button"
           variant="outline"
-          onClick={() => { if (inputRef.current) { inputRef.current.removeAttribute('capture'); inputRef.current.click() } }}
+          onClick={() => {
+            if (inputRef.current) {
+              inputRef.current.value = ''          // reset so same file re-triggers onChange
+              inputRef.current.removeAttribute('capture')
+              inputRef.current.click()
+            }
+          }}
           disabled={isProcessing}
         >
           📁 Choose from gallery
         </Button>
         <Button
           type="button"
-          onClick={() => { if (inputRef.current) { inputRef.current.setAttribute('capture', 'environment'); inputRef.current.click() } }}
+          onClick={() => {
+            if (inputRef.current) {
+              inputRef.current.value = ''          // reset so retake always fires onChange
+              inputRef.current.setAttribute('capture', 'environment')
+              inputRef.current.click()
+            }
+          }}
           disabled={isProcessing}
           style={{ backgroundColor: '#2E7D32', color: 'white' }}
         >
@@ -283,30 +311,54 @@ export default function ImageUploader({
         </div>
       )}
 
-      {/* Google Vision fallback suggestion chips */}
-      {visionResult && (visionResult.label || visionResult.entities.length > 0) && (
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500">Google Vision suggestions (click to use as botanical name):</p>
-          <div className="flex flex-wrap gap-2">
-            {[visionResult.label, ...visionResult.entities].filter(Boolean).map(name => (
+      {/* Google Vision result card */}
+      {visionResult && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 space-y-2">
+          <p className="text-xs font-medium text-blue-700">Google Vision result</p>
+
+          {/* Best guess label — only shown if non-trivially generic */}
+          {visionResult.label && (
+            <p className="text-sm text-blue-900">
+              Best guess:{' '}
               <button
-                key={name}
                 type="button"
-                className="px-3 py-1 text-xs bg-blue-50 border border-blue-200 rounded-full text-blue-700 hover:bg-blue-100"
-                onClick={() => name && fetchSubImages(name)}
+                className="font-medium underline underline-offset-2 hover:text-blue-700"
+                onClick={() => visionResult.label && fetchSubImages(visionResult.label)}
+                title="Click to fetch Wikimedia images for this name"
               >
-                {name}
+                &ldquo;{visionResult.label}&rdquo;
               </button>
-            ))}
+              <span className="ml-1 text-xs text-blue-500 font-normal">(tap to fetch images)</span>
+            </p>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {/* Google Lens — best for accurate plant ID on mobile */}
+            <button
+              type="button"
+              onClick={openInGoogleLens}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-blue-300 rounded-full text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              🔍 Identify in Google Lens
+            </button>
+
+            {/* Google Images with label for visual confirmation */}
+            {visionResult.label && (
+              <a
+                href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(visionResult.label + ' plant')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-full text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                🖼 Search Images
+              </a>
+            )}
           </div>
-          <a
-            href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(visionResult.label ?? visionResult.entities[0] ?? '')}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-600 underline"
-          >
-            Search on Google Images →
-          </a>
+
+          <p className="text-xs text-blue-400">
+            Vision works best for common plants. For species-level accuracy use Plant.id ↓
+          </p>
         </div>
       )}
 
