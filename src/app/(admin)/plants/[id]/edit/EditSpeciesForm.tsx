@@ -197,6 +197,9 @@ export default function EditSpeciesForm({
   // Sub-image promoted to main photo when no main photo exists
   const [promotedToMain, setPromotedToMain] = useState<{ url: string; attr: string | null } | null>(null)
 
+  // Search tags (auto-computed by Vision, not user-editable)
+  const [searchTags, setSearchTags] = useState<string>(species.search_tags ?? '')
+
   // Linked subspecies state
   const [linkedSpecies, setLinkedSpecies]   = useState<LinkedSpeciesCard[]>(initialLinkedSpecies)
   const [newLinkTargetId, setNewLinkTargetId] = useState('')
@@ -561,7 +564,7 @@ export default function EditSpeciesForm({
       const res = await fetch(`/api/plants/${species.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields, ...mainPromotion }),
+        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields, ...mainPromotion, search_tags: searchTags || null }),
       })
       if (!res.ok) {
         const err = await res.json() as { error: string }
@@ -685,6 +688,21 @@ export default function EditSpeciesForm({
               <span className="text-xs text-green-700 font-medium">✓ New photo ready to upload</span>
             )}
           </div>
+
+          {/* Search Tags */}
+          {searchTags && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 mb-1.5">🏷 Search Tags (auto-computed)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {searchTags.split('|').filter(Boolean).map(tag => (
+                  <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 font-medium">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">Re-upload photo to refresh tags</p>
+            </div>
+          )}
         </section>
 
         {/* ── Plant.id Re-identification ───────────────────────────────────── */}

@@ -47,12 +47,14 @@ interface ImageUploaderProps {
   onImageReady: (base64: string, storageRevision: number) => void
   onIdentified: (result: IdentificationResult) => void
   onSubImagesReady: (images: SubImages) => void
+  onTagsComputed?: (tags: string) => void
 }
 
 export default function ImageUploader({
   onImageReady,
   onIdentified,
   onSubImagesReady,
+  onTagsComputed,
 }: ImageUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview]             = useState<string | null>(null)
@@ -170,10 +172,13 @@ export default function ImageUploader({
       incrementApiCount('vision')
 
       if (!res.ok) throw new Error()
-      const data = await res.json() as { bestGuessLabel: string | null; webEntities: { description: string }[] }
+      const data = await res.json() as { bestGuessLabel: string | null; webEntities: { description: string }[]; searchTags: string }
 
       const label = data.bestGuessLabel
       const entities = data.webEntities.map(e => e.description).filter(Boolean)
+      if (data.searchTags && onTagsComputed) {
+        onTagsComputed(data.searchTags)
+      }
       setVisionResult({ label, entities })
       setStatus(prev =>
         prev.replace('· Checking Google Vision…', '') +

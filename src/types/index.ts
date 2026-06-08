@@ -45,6 +45,7 @@ export interface PlantSpecies {
   habitat_type: string | null          // e.g. "Tropical dry forest, scrublands"
   not_applicable_parts: string | null  // pipe-separated e.g. "fruit|bark|root"
   tentative: boolean
+  search_tags: string | null          // pipe-separated visual tags e.g. "flower|white|pink"
   active: boolean
   img_main_url: string | null
   img_main_attr: string | null

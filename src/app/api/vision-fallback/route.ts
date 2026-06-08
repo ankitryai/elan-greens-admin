@@ -23,7 +23,62 @@ interface VisionResponse {
       webEntities?: VisionWebEntity[]
       bestGuessLabels?: { label: string }[]
     }
+    labelAnnotations?: Array<{ description: string; score: number }>
+    imagePropertiesAnnotation?: {
+      dominantColors?: {
+        colors?: Array<{ color: { red: number; green: number; blue: number }; score: number; pixelFraction: number }>
+      }
+    }
   }]
+}
+
+// ── Color extraction ──────────────────────────────────────────────────────────
+function rgbToColorName(r: number, g: number, b: number): string | null {
+  const rn = r / 255, gn = g / 255, bn = b / 255
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn)
+  const l = (max + min) / 2
+  if (l > 0.85 && (max - min) < 0.15) return 'white'
+  if (l < 0.18) return null
+  if ((max - min) < 0.12) return null  // grey / unsaturated
+  const h = max === min ? 0 :
+    max === rn ? ((gn - bn) / (max - min) + (gn < bn ? 6 : 0)) / 6 :
+    max === gn ? ((bn - rn) / (max - min) + 2) / 6 :
+               ((rn - gn) / (max - min) + 4) / 6
+  const hd = h * 360
+  if (hd < 15 || hd >= 345) return 'red'
+  if (hd < 45)  return 'orange'
+  if (hd < 75)  return 'yellow'
+  if (hd < 165) return 'green'
+  if (hd < 200) return 'cyan'
+  if (hd < 255) return 'blue'
+  if (hd < 290) return 'purple'
+  return 'pink'
+}
+
+// Builds the pipe-separated search_tags string from Vision label + color results.
+// Skips overly generic biological taxonomy labels.
+const SKIP_LABELS = new Set([
+  'nature','organism','biology','terrestrial plant','vascular plant','plant',
+  'botany','flora','wildlife','green','vegetation','natural environment',
+])
+
+function computeSearchTags(
+  labels: Array<{ description: string; score: number }>,
+  colors: Array<{ color: { red: number; green: number; blue: number }; score: number }>
+): string {
+  const tags = new Set<string>()
+  // Top labels with score > 0.70
+  for (const l of labels) {
+    if (l.score < 0.70) continue
+    const t = l.description.toLowerCase().trim()
+    if (!SKIP_LABELS.has(t) && t.length > 2) tags.add(t)
+  }
+  // Dominant colors (top 3 by score, deduplicated)
+  for (const c of colors.slice(0, 3)) {
+    const name = rgbToColorName(c.color.red ?? 0, c.color.green ?? 0, c.color.blue ?? 0)
+    if (name) tags.add(name)
+  }
+  return [...tags].slice(0, 12).join('|')
 }
 
 export async function POST(request: NextRequest) {
@@ -49,7 +104,11 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           requests: [{
             image: { content: imageBase64 },
-            features: [{ type: 'WEB_DETECTION', maxResults: 5 }],
+            features: [
+              { type: 'WEB_DETECTION',     maxResults: 5  },
+              { type: 'LABEL_DETECTION',   maxResults: 10 },
+              { type: 'IMAGE_PROPERTIES'                  },
+            ],
           }],
         }),
       }
@@ -68,10 +127,15 @@ export async function POST(request: NextRequest) {
   const result = await response.json() as VisionResponse
   const webDetection = result.responses[0]?.webDetection
 
+  const labels = result.responses[0]?.labelAnnotations ?? []
+  const colors = result.responses[0]?.imagePropertiesAnnotation?.dominantColors?.colors ?? []
+  const searchTags = computeSearchTags(labels, colors)
+
   // Return top entities and best-guess labels in a clean shape.
   // The UI shows these as suggestions with a "Search on Google Images" link.
   return NextResponse.json({
     webEntities: webDetection?.webEntities?.slice(0, 3) ?? [],
     bestGuessLabel: webDetection?.bestGuessLabels?.[0]?.label ?? null,
+    searchTags,   // new field
   })
 }

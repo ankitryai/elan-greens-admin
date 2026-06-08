@@ -58,13 +58,21 @@ export default async function PlantsPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Plants</h1>
-        <Link
-          href="/plants/new"
-          className="px-4 py-2 rounded-lg text-white text-sm font-medium"
-          style={{ backgroundColor: '#2E7D32' }}
-        >
-          + Add Species 🌿
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/plants/backfill"
+            className="px-3 py-2 rounded-lg text-gray-600 border border-gray-300 text-sm font-medium hover:bg-gray-50"
+          >
+            🏷 Tag Images
+          </Link>
+          <Link
+            href="/plants/new"
+            className="px-4 py-2 rounded-lg text-white text-sm font-medium"
+            style={{ backgroundColor: '#2E7D32' }}
+          >
+            + Add Species 🌿
+          </Link>
+        </div>
       </div>
 
       {/* Search — client-side debounce, triggers at 4+ chars, no Enter needed */}

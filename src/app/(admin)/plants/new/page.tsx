@@ -38,6 +38,7 @@ export default function AddSpeciesPage() {
   const [duplicateSpecies, setDuplicateSpecies] = useState<{ id: string; name: string } | null>(null)
   const [populatingFromName, setPopulatingFromName] = useState(false)
   const [populateStatus, setPopulateStatus]   = useState<string | null>(null)
+  const [searchTags, setSearchTags]           = useState<string | null>(null)
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<PlantSpeciesFormData>({
     resolver: zodResolver(plantSpeciesSchema),
@@ -170,7 +171,7 @@ export default function AddSpeciesPage() {
       const res = await fetch('/api/plants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, ...imageFields, imageBase64 }),
+        body: JSON.stringify({ ...data, ...imageFields, imageBase64, search_tags: searchTags }),
       })
 
       if (!res.ok) {
@@ -226,6 +227,7 @@ export default function AddSpeciesPage() {
             onImageReady={(b64) => setImageBase64(b64)}
             onIdentified={handleIdentified}
             onSubImagesReady={setSubImages}
+            onTagsComputed={tags => setSearchTags(tags)}
           />
           {aiConfidence !== null && (
             <p className="text-xs text-amber-600">

@@ -86,6 +86,11 @@ export async function POST(request: NextRequest) {
     if (body[key]) (imageFields as Record<string, unknown>)[key] = body[key]
   }
 
+  // Accept search_tags from the form payload (computed by Vision on upload)
+  if (typeof body.search_tags === 'string' && body.search_tags) {
+    (imageFields as Record<string, unknown>).search_tags = body.search_tags
+  }
+
   // Convert empty strings to null so optional fields (esp. integer columns like
   // observations_count) don't send "" to Postgres — that causes "invalid input
   // syntax for type integer" errors.

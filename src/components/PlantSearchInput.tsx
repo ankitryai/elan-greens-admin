@@ -7,6 +7,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
+// Minimal SpeechRecognition interface for TypeScript — not in all lib.dom.d.ts versions
+interface SpeechRecognitionAlternative { transcript: string }
+interface SpeechRecognitionResultItem { [index: number]: SpeechRecognitionAlternative }
+interface SpeechRecognitionResultList { [index: number]: SpeechRecognitionResultItem }
+interface SpeechRecognitionEvent { results: SpeechRecognitionResultList }
+interface SpeechRecognitionInstance {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  onstart: (() => void) | null
+  onend:   (() => void) | null
+  onresult: ((e: SpeechRecognitionEvent) => void) | null
+  start: () => void
+}
+interface SpeechRecognitionConstructor {
+  new(): SpeechRecognitionInstance
+}
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+}
+
 export function PlantSearchInput({
   defaultValue,
   sort,
@@ -16,9 +40,31 @@ export function PlantSearchInput({
   sort: string
   dir: string
 }) {
-  const [value, setValue]   = useState(defaultValue)
-  const router              = useRouter()
-  const timerRef            = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [value, setValue]     = useState(defaultValue)
+  const [listening, setListening] = useState(false)
+  const [hasSpeech, setHasSpeech] = useState(false)
+  const router                = useRouter()
+  const timerRef              = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    setHasSpeech('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+  }, [])
+
+  function startVoice() {
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition
+    if (!SR) return
+    const r = new SR()
+    r.lang = 'en-IN'
+    r.interimResults = false
+    r.maxAlternatives = 1
+    r.onstart = () => setListening(true)
+    r.onend   = () => setListening(false)
+    r.onresult = (e) => {
+      const transcript = e.results[0][0].transcript
+      setValue(transcript)
+    }
+    r.start()
+  }
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -44,6 +90,17 @@ export function PlantSearchInput({
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
           {4 - value.length} more…
         </span>
+      )}
+      {hasSpeech && (
+        <button
+          type="button"
+          onClick={startVoice}
+          title="Voice search (Indian English)"
+          className={`absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-green-700 transition-colors ${listening ? 'text-red-500 animate-pulse' : ''}`}
+          aria-label="Voice search"
+        >
+          🎤
+        </button>
       )}
       {value.length >= 4 && (
         <button

@@ -43,6 +43,11 @@ export async function PATCH(
     Object.entries(parsed.data).map(([k, v]) => [k, v === '' ? null : v])
   ) as Partial<PlantSpecies>
 
+  // Accept search_tags from the form payload (computed by Vision, not user-editable)
+  if (typeof body.search_tags === 'string') {
+    fields.search_tags = body.search_tags || null
+  }
+
   // Only replace the main image if a new photo was uploaded or a direct URL is promoted
   let uploadedPath: string | null = null
   const storageDb = imageBase64 ? createServiceRoleClient() : null
