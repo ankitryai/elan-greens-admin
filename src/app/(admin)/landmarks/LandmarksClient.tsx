@@ -22,7 +22,15 @@ interface FormState {
 
 const EMPTY: FormState = { name: '', sub_label: '', icon: '', lat: '', lng: '', category: 'Amenity' }
 
-export default function LandmarksClient({ initialLandmarks }: { initialLandmarks: Landmark[] }) {
+export default function LandmarksClient({
+  initialLandmarks,
+  propertyId,
+  propertyName,
+}: {
+  initialLandmarks: Landmark[]
+  propertyId:       string
+  propertyName:     string
+}) {
   const [landmarks, setLandmarks] = useState<Landmark[]>(initialLandmarks)
   const [form, setForm]           = useState<FormState>(EMPTY)
   const [editId, setEditId]       = useState<string | null>(null)
@@ -78,7 +86,7 @@ export default function LandmarksClient({ initialLandmarks }: { initialLandmarks
       } else {
         const res = await fetch('/api/landmarks', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, property_id: 'elan' }),
+          body: JSON.stringify({ ...payload, property_id: propertyId }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error)

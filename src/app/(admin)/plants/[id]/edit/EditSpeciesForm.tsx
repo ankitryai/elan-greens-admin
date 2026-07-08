@@ -169,12 +169,16 @@ export default function EditSpeciesForm({
   allSpeciesSnippets,
   allLandmarks,
   initialLandmarkIds,
+  suggestedLandmarkIds,
+  propertyName,
 }: {
   species:              PlantSpecies
   initialLinkedSpecies: LinkedSpeciesCard[]
   allSpeciesSnippets:   SpeciesSnippet[]
   allLandmarks:         Landmark[]
   initialLandmarkIds:   string[]
+  suggestedLandmarkIds: string[]
+  propertyName:         string
 }) {
   const router = useRouter()
   const [saving, setSaving]                       = useState(false)
@@ -206,9 +210,13 @@ export default function EditSpeciesForm({
   // Search tags (auto-computed by Vision, not user-editable)
   const [searchTags, setSearchTags] = useState<string>(species.search_tags ?? '')
 
-  // Landmark tags — saved separately to plant_landmark_tags table
-  const [selectedLandmarkIds, setSelectedLandmarkIds] = useState<Set<string>>(new Set(initialLandmarkIds))
-  const [savingLandmarks, setSavingLandmarks]         = useState(false)
+  // Landmark tags — saved separately to plant_landmark_tags table.
+  // If no saved tags exist, pre-populate with NLP-suggested IDs (amber chips).
+  const isSuggested = initialLandmarkIds.length === 0 && suggestedLandmarkIds.length > 0
+  const [selectedLandmarkIds, setSelectedLandmarkIds] = useState<Set<string>>(
+    new Set(initialLandmarkIds.length > 0 ? initialLandmarkIds : suggestedLandmarkIds)
+  )
+  const [savingLandmarks, setSavingLandmarks] = useState(false)
 
   // Linked subspecies state
   const [linkedSpecies, setLinkedSpecies]   = useState<LinkedSpeciesCard[]>(initialLinkedSpecies)
@@ -1648,13 +1656,23 @@ export default function EditSpeciesForm({
         {/* ── Landmark Tags ────────────────────────────────────────────────── */}
         <section className="space-y-3">
           <div className="border-b pb-2">
-            <h2 className="text-base font-semibold text-gray-700">Map Locations</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-semibold text-gray-700">Map Locations</h2>
+              <span className="text-[11px] bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                🏢 {propertyName}
+              </span>
+            </div>
             <p className="text-[11px] text-gray-400 mt-0.5">
               Tag this plant to one or more landmarks — used to place it on the map.
               {selectedLandmarkIds.size > 0 && (
                 <span className="ml-1 font-medium text-green-700">{selectedLandmarkIds.size} selected</span>
               )}
             </p>
+            {isSuggested && suggestedLandmarkIds.length > 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5">
+                ✨ Pre-selected from plant description — verify and save, or adjust as needed.
+              </p>
+            )}
           </div>
           {allLandmarks.length === 0 ? (
             <p className="text-xs text-gray-400 italic">No landmarks found — add them in the Landmarks section first.</p>
@@ -1667,7 +1685,9 @@ export default function EditSpeciesForm({
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{cat}</p>
                   <div className="flex flex-wrap gap-2">
                     {items.map(lm => {
-                      const selected = selectedLandmarkIds.has(lm.id)
+                      const selected   = selectedLandmarkIds.has(lm.id)
+                      const wasSaved   = initialLandmarkIds.includes(lm.id)
+                      const isSuggest  = isSuggested && suggestedLandmarkIds.includes(lm.id)
                       return (
                         <button
                           key={lm.id}
@@ -1678,14 +1698,21 @@ export default function EditSpeciesForm({
                             return next
                           })}
                           className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                            selected
-                              ? 'bg-green-100 border-green-400 text-green-800 font-semibold'
-                              : 'bg-white border-gray-200 text-gray-600 hover:border-green-300 hover:text-green-700'
+                            selected && wasSaved
+                              ? 'bg-green-100 border-green-400 text-green-800 font-semibold'  // saved + still selected
+                              : selected && isSuggest
+                              ? 'bg-amber-50 border-amber-400 text-amber-800 font-semibold'   // suggested pre-selection
+                              : selected
+                              ? 'bg-green-100 border-green-400 text-green-800 font-semibold'  // newly selected
+                              : 'bg-white border-gray-200 text-gray-500 hover:border-green-300 hover:text-green-700'
                           }`}
+                          title={isSuggest && selected ? 'Auto-suggested from description' : undefined}
                         >
                           {lm.icon && <span>{lm.icon}</span>}
                           <span>{lm.name}{lm.sub_label ? ` · ${lm.sub_label}` : ''}</span>
-                          {selected && <span>✓</span>}
+                          {selected && wasSaved  && <span>✓</span>}
+                          {selected && isSuggest && <span>✨</span>}
+                          {selected && !wasSaved && !isSuggest && <span>✓</span>}
                         </button>
                       )
                     })}
