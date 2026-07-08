@@ -23,7 +23,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { plantSpeciesSchema, type PlantSpeciesFormData } from '@/lib/validations'
-import type { PlantSpecies } from '@/types'
+import type { PlantSpecies, Landmark } from '@/types'
 import type { LinkedSpeciesCard, SpeciesSnippet } from '@/types'
 import type { SubImages } from '@/components/ImageUploader'
 import type { PlantIdResult } from '@/types'
@@ -38,6 +38,8 @@ import type { FetchDebug, EnrichmentResult } from '@/types'
 import { sanitiseSubImages, hasAnySubImages } from '@/lib/subImageHelpers'
 
 const PLANT_ID_LIMIT = 100
+
+const LANDMARK_CATEGORIES = ['Block', 'Gate', 'Sports', 'Amenity', 'Infrastructure', 'Green Space'] as const
 
 // ── Canvas compression ───────────────────────────────────────────────────────
 function compressToBase64(file: File): Promise<string> {
@@ -165,10 +167,14 @@ export default function EditSpeciesForm({
   species,
   initialLinkedSpecies,
   allSpeciesSnippets,
+  allLandmarks,
+  initialLandmarkIds,
 }: {
   species:              PlantSpecies
   initialLinkedSpecies: LinkedSpeciesCard[]
   allSpeciesSnippets:   SpeciesSnippet[]
+  allLandmarks:         Landmark[]
+  initialLandmarkIds:   string[]
 }) {
   const router = useRouter()
   const [saving, setSaving]                       = useState(false)
@@ -199,6 +205,10 @@ export default function EditSpeciesForm({
 
   // Search tags (auto-computed by Vision, not user-editable)
   const [searchTags, setSearchTags] = useState<string>(species.search_tags ?? '')
+
+  // Landmark tags — saved separately to plant_landmark_tags table
+  const [selectedLandmarkIds, setSelectedLandmarkIds] = useState<Set<string>>(new Set(initialLandmarkIds))
+  const [savingLandmarks, setSavingLandmarks]         = useState(false)
 
   // Linked subspecies state
   const [linkedSpecies, setLinkedSpecies]   = useState<LinkedSpeciesCard[]>(initialLinkedSpecies)
@@ -534,6 +544,7 @@ export default function EditSpeciesForm({
       toast.warning('Saving without a photo — use "Replace photo" to add one before saving')
     }
     setSaving(true)
+    setSavingLandmarks(true)
     try {
       // Build explicit nulls for every saved slot the admin has marked deleted.
       // A fresh fetch for the same category overrides these (appears later in spread).
@@ -561,11 +572,19 @@ export default function EditSpeciesForm({
         ? { img_main_url: promotedToMain.url, img_main_attr: promotedToMain.attr ?? 'Promoted from gallery' }
         : {}
 
-      const res = await fetch(`/api/plants/${species.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields, ...mainPromotion, search_tags: searchTags || null }),
-      })
+      // Save species + landmark tags in parallel
+      const [res] = await Promise.all([
+        fetch(`/api/plants/${species.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...data, imageBase64: newImageBase64, ...imageFields, ...mainPromotion, search_tags: searchTags || null }),
+        }),
+        fetch(`/api/plant-landmark-tags/${species.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ landmark_ids: Array.from(selectedLandmarkIds) }),
+        }),
+      ])
       if (!res.ok) {
         const err = await res.json() as { error: string }
         throw new Error(err.error)
@@ -579,6 +598,7 @@ export default function EditSpeciesForm({
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSaving(false)
+      setSavingLandmarks(false)
     }
   }
 
@@ -1622,6 +1642,60 @@ export default function EditSpeciesForm({
             </ul>
           ) : (
             <p className="text-xs text-gray-400 italic">No linked species yet.</p>
+          )}
+        </section>
+
+        {/* ── Landmark Tags ────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <div className="border-b pb-2">
+            <h2 className="text-base font-semibold text-gray-700">Map Locations</h2>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Tag this plant to one or more landmarks — used to place it on the map.
+              {selectedLandmarkIds.size > 0 && (
+                <span className="ml-1 font-medium text-green-700">{selectedLandmarkIds.size} selected</span>
+              )}
+            </p>
+          </div>
+          {allLandmarks.length === 0 ? (
+            <p className="text-xs text-gray-400 italic">No landmarks found — add them in the Landmarks section first.</p>
+          ) : (
+            LANDMARK_CATEGORIES.map(cat => {
+              const items = allLandmarks.filter(l => l.category === cat && l.active)
+              if (items.length === 0) return null
+              return (
+                <div key={cat}>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{cat}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {items.map(lm => {
+                      const selected = selectedLandmarkIds.has(lm.id)
+                      return (
+                        <button
+                          key={lm.id}
+                          type="button"
+                          onClick={() => setSelectedLandmarkIds(prev => {
+                            const next = new Set(prev)
+                            if (selected) next.delete(lm.id); else next.add(lm.id)
+                            return next
+                          })}
+                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                            selected
+                              ? 'bg-green-100 border-green-400 text-green-800 font-semibold'
+                              : 'bg-white border-gray-200 text-gray-600 hover:border-green-300 hover:text-green-700'
+                          }`}
+                        >
+                          {lm.icon && <span>{lm.icon}</span>}
+                          <span>{lm.name}{lm.sub_label ? ` · ${lm.sub_label}` : ''}</span>
+                          {selected && <span>✓</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })
+          )}
+          {savingLandmarks && (
+            <p className="text-xs text-gray-400">Saving landmark tags…</p>
           )}
         </section>
 

@@ -205,6 +205,20 @@ export interface FetchDebug {
   level?:  'species' | 'genus'   // iNaturalist only
 }
 
+// ── Landmarks (landmarks table) ──────────────────────────────────────────────
+export interface Landmark {
+  id:          string
+  property_id: string
+  name:        string
+  sub_label:   string | null   // tower name for Block category
+  icon:        string | null   // emoji for map display
+  lat:         number
+  lng:         number
+  category:    'Block' | 'Gate' | 'Sports' | 'Amenity' | 'Infrastructure' | 'Green Space'
+  active:      boolean
+  created_at:  string
+}
+
 // ── API Logs (api_logs table) ─────────────────────────────────────────────────
 export interface ApiLog {
   id:          string

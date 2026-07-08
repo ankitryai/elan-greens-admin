@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery, ApiLog, ApiLogStats } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery, ApiLog, ApiLogStats, Landmark } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -431,4 +431,73 @@ export async function getApiLogs(api_name: string, limit = 50): Promise<ApiLog[]
     .limit(limit)
   if (error) throw new Error(`Failed to load API logs: ${error.message}`)
   return data as ApiLog[]
+}
+
+// ── LANDMARKS ─────────────────────────────────────────────────────────────────
+
+export async function getLandmarks(propertyId = 'elan'): Promise<Landmark[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('landmarks')
+    .select('*')
+    .eq('property_id', propertyId)
+    .order('category')
+    .order('name')
+  if (error) throw new Error(`Failed to load landmarks: ${error.message}`)
+  return data as Landmark[]
+}
+
+export async function createLandmark(fields: Omit<Landmark, 'id' | 'created_at'>): Promise<Landmark> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('landmarks')
+    .insert(fields)
+    .select()
+    .single()
+  if (error) throw new Error(`Failed to create landmark: ${error.message}`)
+  return data as Landmark
+}
+
+export async function updateLandmark(id: string, fields: Partial<Omit<Landmark, 'id' | 'created_at'>>): Promise<Landmark> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('landmarks')
+    .update(fields)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw new Error(`Failed to update landmark: ${error.message}`)
+  return data as Landmark
+}
+
+export async function deleteLandmark(id: string): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db.from('landmarks').delete().eq('id', id)
+  if (error) throw new Error(`Failed to delete landmark: ${error.message}`)
+}
+
+// ── PLANT LANDMARK TAGS ───────────────────────────────────────────────────────
+
+export async function getLandmarkTagsForSpecies(speciesId: string): Promise<string[]> {
+  const db = createServiceRoleClient()
+  const { data, error } = await db
+    .from('plant_landmark_tags')
+    .select('landmark_id')
+    .eq('species_id', speciesId)
+  if (error) throw new Error(`Failed to load landmark tags: ${error.message}`)
+  return (data ?? []).map(r => r.landmark_id)
+}
+
+export async function setLandmarkTagsForSpecies(speciesId: string, landmarkIds: string[]): Promise<void> {
+  const db = createServiceRoleClient()
+  // Delete all existing tags for this species, then insert the new set
+  const { error: delErr } = await db
+    .from('plant_landmark_tags')
+    .delete()
+    .eq('species_id', speciesId)
+  if (delErr) throw new Error(`Failed to clear landmark tags: ${delErr.message}`)
+  if (landmarkIds.length === 0) return
+  const rows = landmarkIds.map(landmark_id => ({ species_id: speciesId, landmark_id }))
+  const { error: insErr } = await db.from('plant_landmark_tags').insert(rows)
+  if (insErr) throw new Error(`Failed to save landmark tags: ${insErr.message}`)
 }

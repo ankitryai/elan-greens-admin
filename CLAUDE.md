@@ -309,6 +309,19 @@ Two public buckets must exist:
 
 Both must be set to **Public** in Supabase dashboard. Service role client is used for uploads (bypasses RLS).
 
+### search_tags system
+
+`plant_species.search_tags` is a pipe-separated text column (e.g. `"green|leaf|flower|white|tropical"`).
+- **Computed at upload time** by the Vision route (`/api/vision-fallback`) using `LABEL_DETECTION` + `IMAGE_PROPERTIES`. Never computed at query time — zero consumer-app cost.
+- `computeSearchTags(labels, colors)` in `vision-fallback/route.ts` builds the string: skips generic biology labels, maps RGB → colour name, max 12 tags.
+- `onTagsComputed(data.searchTags)` callback in `ImageUploader.tsx` passes the result up to the plant form so it can be saved.
+- **Backfill endpoint**: `POST /api/backfill-tags` — superadmin only; finds plants with `img_main_url` but no `search_tags`; calls Vision using `imageUri` (public Supabase Storage URL, no base64 encoding); 200ms delay between plants. Trigger from `/plants/backfill` page.
+- **Migration**: `supabase/search-tags-migration.sql` → `ALTER TABLE plant_species ADD COLUMN IF NOT EXISTS search_tags text;` — run in Supabase SQL Editor once.
+
+### Voice search in admin
+
+`PlantSearchInput.tsx` has a mic button that uses Web Speech API (`en-IN` locale). Pattern repeated from consumer `PlantGrid.tsx`. SSR guard: `hasSpeech` is set in a `useEffect` (never on the server). Mic turns red + pulses while listening. The button is only rendered when `hasSpeech === true`.
+
 ### Supabase tables managed by admin app
 | Table | RLS read | Admin writes via |
 |---|---|---|
@@ -319,6 +332,7 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 | `news_sources` | anon SELECT | Settings page Server Actions |
 | `app_settings` | anon SELECT | Settings page Server Actions |
 | `news_topic_queries` | anon SELECT | Settings page Server Actions |
+| `api_logs` | service-role only | `logApiCall()` in `src/lib/apiLogger.ts` |
 
 ---
 
@@ -392,3 +406,13 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 24. **File input must be reset before retake.** Without `inputRef.current.value = ''` before calling `.click()`, selecting the same photo again (or retaking with the camera) does not fire `onChange`. Vision never re-runs. Always reset the input value in both "Take photo" and "Choose from gallery" button handlers before triggering the click.
 
 25. **pg_cron must be enabled before use.** Supabase's `cron` schema does not exist by default. Enable it via: Supabase Dashboard → Database → Extensions → search "pg_cron" → toggle On. Then `SELECT cron.schedule(...)` works. Without enabling, SQL editor throws `ERROR: 3F000: schema "cron" does not exist`.
+
+26. **Pre-compute search tags at upload time, never at query time.** Vision `LABEL_DETECTION` + `IMAGE_PROPERTIES` runs once on photo upload and the result is stored in `plant_species.search_tags` (pipe-separated). The consumer app does a plain `.includes(q)` on this string — zero API cost at search time. For existing plants without tags, use the `/api/backfill-tags` endpoint (admin-only, 200ms delay between calls to avoid Vision quota).
+
+27. **Use `imageUri` (public URL) not base64 for backfilling.** When calling Vision on existing plant photos, pass `{ source: { imageUri: imgUrl } }` instead of `{ source: { image: { content: base64 } } }`. No client-side encoding overhead, no 10MB base64 payload — Vision fetches the image directly from Supabase Storage. Only works because the `plant-images` bucket is public.
+
+28. **Web Speech API SSR guard.** `'SpeechRecognition' in window` crashes on the server. Always initialise `hasSpeech` in a `useEffect`, never in the initial `useState` call (or component body). Pattern: `const [hasSpeech, setHasSpeech] = useState(false)` + `useEffect(() => { setHasSpeech('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) }, [])`. Render the mic button only when `hasSpeech === true`.
+
+29. **Pending one-time ops after last session.** Two things still need doing manually:
+    - Run `supabase/search-tags-migration.sql` in Supabase SQL Editor (adds `search_tags` column)
+    - Visit `/plants/backfill` in the admin app and click "Run Backfill" to populate `search_tags` for all ~40 existing plants that have photos
