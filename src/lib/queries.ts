@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { createServiceRoleClient } from '@/lib/supabase.server'
-import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery, ApiLog, ApiLogStats, Landmark } from '@/types'
+import type { PlantSpecies, PlantInstance, StaffMember, DashboardStats, LinkedSpeciesCard, SpeciesSnippet, NewsSource, AppSetting, NewsTopicQuery, ApiLog, ApiLogStats, Landmark, PlantLocationInfo } from '@/types'
 import type { PlantSpeciesFormData, PlantInstanceFormData, StaffFormData } from '@/lib/validations'
 
 // ── generatePlantId ────────────────────────────────────────────────────────────
@@ -486,6 +486,30 @@ export async function getLandmarkTagsForSpecies(speciesId: string): Promise<stri
     .eq('species_id', speciesId)
   if (error) throw new Error(`Failed to load landmark tags: ${error.message}`)
   return (data ?? []).map(r => r.landmark_id)
+}
+
+// ── PLANT LOCATION INFO ───────────────────────────────────────────────────────
+
+export async function getPlantLocationInfoForSpecies(speciesId: string, propertyId = 'elan'): Promise<string | null> {
+  const db = createServiceRoleClient()
+  const { data } = await db
+    .from('plant_location_info')
+    .select('location_info')
+    .eq('species_id', speciesId)
+    .eq('property_id', propertyId)
+    .maybeSingle()
+  return (data as PlantLocationInfo | null)?.location_info ?? null
+}
+
+export async function setPlantLocationInfo(speciesId: string, propertyId: string, locationInfo: string | null): Promise<void> {
+  const db = createServiceRoleClient()
+  const { error } = await db
+    .from('plant_location_info')
+    .upsert(
+      { species_id: speciesId, property_id: propertyId, location_info: locationInfo, updated_at: new Date().toISOString() },
+      { onConflict: 'species_id,property_id' }
+    )
+  if (error) throw new Error(`Failed to save location info: ${error.message}`)
 }
 
 export async function setLandmarkTagsForSpecies(speciesId: string, landmarkIds: string[]): Promise<void> {

@@ -205,6 +205,16 @@ export interface FetchDebug {
   level?:  'species' | 'genus'   // iNaturalist only
 }
 
+// ── plant_location_info (property-scoped location description) ───────────────
+export interface PlantLocationInfo {
+  id:           string
+  species_id:   string
+  property_id:  string
+  location_info: string | null
+  created_at:   string
+  updated_at:   string
+}
+
 // ── Landmarks (landmarks table) ──────────────────────────────────────────────
 export interface Landmark {
   id:          string

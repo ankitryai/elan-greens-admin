@@ -2,7 +2,7 @@
 // client form. This avoids a useEffect + loading state in the client component.
 
 import { notFound } from 'next/navigation'
-import { getSpeciesById, getLinkedSpecies, getAllSpeciesSnippets, getLandmarks, getLandmarkTagsForSpecies } from '@/lib/queries'
+import { getSpeciesById, getLinkedSpecies, getAllSpeciesSnippets, getLandmarks, getLandmarkTagsForSpecies, getPlantLocationInfoForSpecies } from '@/lib/queries'
 import EditSpeciesForm from './EditSpeciesForm'
 import type { Landmark } from '@/types'
 
@@ -51,18 +51,20 @@ export default async function EditSpeciesPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const [species, initialLinkedSpecies, allSnippets, allLandmarks, initialLandmarkIds] = await Promise.all([
+  const [species, initialLinkedSpecies, allSnippets, allLandmarks, initialLandmarkIds, initialLocationInfo] = await Promise.all([
     getSpeciesById(id).catch(() => null),
     getLinkedSpecies(id).catch(() => []),
     getAllSpeciesSnippets().catch(() => []),
     getLandmarks(PROPERTY_ID).catch(() => []),
     getLandmarkTagsForSpecies(id).catch(() => []),
+    getPlantLocationInfoForSpecies(id, PROPERTY_ID).catch(() => null),
   ])
   if (!species) notFound()
 
-  // Only suggest when no tags are saved yet; don't overwrite deliberate choices
+  // Only suggest when no tags are saved yet; don't overwrite deliberate choices.
+  // Prefer plant_location_info (property-scoped), fall back to interesting_fact.
   const suggestedLandmarkIds = initialLandmarkIds.length === 0
-    ? suggestFromIF(species.interesting_fact ?? null, allLandmarks)
+    ? suggestFromIF(initialLocationInfo ?? species.interesting_fact ?? null, allLandmarks)
     : []
 
   return (
@@ -74,6 +76,8 @@ export default async function EditSpeciesPage({
       initialLandmarkIds={initialLandmarkIds}
       suggestedLandmarkIds={suggestedLandmarkIds}
       propertyName={PROPERTY_NAME}
+      propertyId={PROPERTY_ID}
+      initialLocationInfo={initialLocationInfo}
     />
   )
 }

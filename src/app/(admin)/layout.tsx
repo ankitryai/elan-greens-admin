@@ -40,6 +40,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <span className="ml-2 text-xs text-gray-400 font-medium tracking-wide uppercase">admin</span>
         </div>
 
+        {/* Active property indicator */}
+        <div className="px-4 py-2.5 bg-green-50 border-b border-green-100">
+          <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wide leading-none mb-0.5">Working for</p>
+          <p className="text-xs font-semibold text-green-800 leading-tight">Divyasree Elan Homes</p>
+        </div>
+
         {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {NAV_ITEMS.map(item => (

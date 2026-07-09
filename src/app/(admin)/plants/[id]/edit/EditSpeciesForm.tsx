@@ -171,6 +171,8 @@ export default function EditSpeciesForm({
   initialLandmarkIds,
   suggestedLandmarkIds,
   propertyName,
+  propertyId,
+  initialLocationInfo,
 }: {
   species:              PlantSpecies
   initialLinkedSpecies: LinkedSpeciesCard[]
@@ -179,6 +181,8 @@ export default function EditSpeciesForm({
   initialLandmarkIds:   string[]
   suggestedLandmarkIds: string[]
   propertyName:         string
+  propertyId:           string
+  initialLocationInfo:  string | null
 }) {
   const router = useRouter()
   const [saving, setSaving]                       = useState(false)
@@ -209,6 +213,9 @@ export default function EditSpeciesForm({
 
   // Search tags (auto-computed by Vision, not user-editable)
   const [searchTags, setSearchTags] = useState<string>(species.search_tags ?? '')
+
+  // Property-scoped location description (plant_location_info table)
+  const [locationInfo, setLocationInfo] = useState(initialLocationInfo ?? '')
 
   // Landmark tags — saved separately to plant_landmark_tags table.
   // If no saved tags exist, pre-populate with NLP-suggested IDs (amber chips).
@@ -580,7 +587,7 @@ export default function EditSpeciesForm({
         ? { img_main_url: promotedToMain.url, img_main_attr: promotedToMain.attr ?? 'Promoted from gallery' }
         : {}
 
-      // Save species + landmark tags in parallel
+      // Save species + landmark tags + location info in parallel
       const [res] = await Promise.all([
         fetch(`/api/plants/${species.id}`, {
           method: 'PATCH',
@@ -591,6 +598,11 @@ export default function EditSpeciesForm({
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ landmark_ids: Array.from(selectedLandmarkIds) }),
+        }),
+        fetch(`/api/plant-location-info/${species.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location_info: locationInfo.trim() || null, property_id: propertyId }),
         }),
       ])
       if (!res.ok) {
@@ -1051,7 +1063,10 @@ export default function EditSpeciesForm({
           <Field label="Medicinal / Ecological Properties" error={errors.medicinal_properties?.message}>
             <CharCountTextarea name="medicinal_properties" register={register} setValue={setValue} watch={watch} max={300} />
           </Field>
-          <Field label="Interesting Fact"><Input {...register('interesting_fact')} /></Field>
+          <Field label="Interesting Fact">
+            <Input {...register('interesting_fact')} placeholder="A botanical curiosity — not location-specific" />
+            <p className="text-[10px] text-gray-400 mt-0.5">Global plant fact (unrelated to where it grows at any property)</p>
+          </Field>
           <Field label="Internal Notes"><Input {...register('notes')} /></Field>
         </section>
 
@@ -1653,23 +1668,48 @@ export default function EditSpeciesForm({
           )}
         </section>
 
-        {/* ── Landmark Tags ────────────────────────────────────────────────── */}
+        {/* ── Location at Property ─────────────────────────────────────────── */}
         <section className="space-y-3">
           <div className="border-b pb-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-semibold text-gray-700">Map Locations</h2>
+              <h2 className="text-base font-semibold text-gray-700">Location at Property</h2>
               <span className="text-[11px] bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded-full font-medium">
                 🏢 {propertyName}
               </span>
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              Tag this plant to one or more landmarks — used to place it on the map.
+              Where does this plant grow at {propertyName}? Used for map placement and landmark tagging.
+            </p>
+          </div>
+
+          {/* Location description (plant_location_info) */}
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Location Description</label>
+            <textarea
+              value={locationInfo}
+              onChange={e => setLocationInfo(e.target.value)}
+              rows={3}
+              placeholder="e.g. Near Block 1A entrance, beside the swimming pool…"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <p className="text-[10px] text-gray-400">
+              Property-specific — this text is used by the NLP parser to suggest landmark matches.
+            </p>
+          </div>
+
+          {/* Landmark chip picker */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-medium text-gray-700">Landmark Tags</p>
               {selectedLandmarkIds.size > 0 && (
-                <span className="ml-1 font-medium text-green-700">{selectedLandmarkIds.size} selected</span>
+                <span className="text-[11px] font-medium text-green-700">{selectedLandmarkIds.size} selected</span>
               )}
+            </div>
+            <p className="text-[11px] text-gray-400">
+              Tag this plant to one or more landmarks — used to place it on the map.
             </p>
             {isSuggested && suggestedLandmarkIds.length > 0 && (
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5">
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
                 ✨ Pre-selected from plant description — verify and save, or adjust as needed.
               </p>
             )}
