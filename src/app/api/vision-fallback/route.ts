@@ -64,7 +64,7 @@ const SKIP_LABELS = new Set([
 
 function computeSearchTags(
   labels: Array<{ description: string; score: number }>,
-  colors: Array<{ color: { red: number; green: number; blue: number }; score: number }>
+  colors: Array<{ color: { red: number; green: number; blue: number }; score: number; pixelFraction?: number }>
 ): string {
   const tags = new Set<string>()
   // Top labels with score > 0.70
