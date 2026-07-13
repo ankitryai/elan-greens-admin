@@ -28,15 +28,26 @@ function rgbToColorName(r: number, g: number, b: number): string | null {
   return 'pink'
 }
 const SKIP = new Set(['nature','organism','biology','terrestrial plant','vascular plant','plant','botany','flora','wildlife','green','vegetation','natural environment'])
-function computeTags(labels: Array<{description:string;score:number}>, colors: Array<{color:{red:number;green:number;blue:number};score:number}>): string {
+function computeTags(
+  labels: Array<{description:string;score:number}>,
+  colors: Array<{color:{red:number;green:number;blue:number};score:number;pixelFraction?:number}>
+): string {
   const tags = new Set<string>()
   for (const l of labels) { if (l.score>=0.70) { const t=l.description.toLowerCase().trim(); if(!SKIP.has(t)&&t.length>2) tags.add(t) } }
-  for (const c of colors.slice(0,3)) { const n=rgbToColorName(c.color.red??0,c.color.green??0,c.color.blue??0); if(n) tags.add(n) }
+  // Require pixelFraction ≥ 10% so background tints (yellow sky, warm concrete)
+  // don't pollute color tags — Vision's `score` is saturation-weighted, not area.
+  for (const c of colors) {
+    if ((c.pixelFraction??0) < 0.10) continue
+    const n=rgbToColorName(c.color.red??0,c.color.green??0,c.color.blue??0)
+    if(n) tags.add(n)
+  }
   return [...tags].slice(0,12).join('|')
 }
 
 export async function POST(request: NextRequest) {
-  void request
+  const body = await request.json().catch(() => ({})) as { overwrite?: boolean }
+  const overwrite = body.overwrite === true
+
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user || user.email !== process.env.SUPERADMIN_EMAIL) {
@@ -44,17 +55,23 @@ export async function POST(request: NextRequest) {
   }
 
   const db = createServiceRoleClient()
-  // Only plants with a main photo and no tags yet
-  const { data: plants, error } = await db
+  let query = db
     .from('plant_species')
     .select('id, common_name, img_main_url')
     .not('img_main_url', 'is', null)
-    .or('search_tags.is.null,search_tags.eq.')
     .is('deleted_at', null)
+
+  // Without overwrite: skip plants that already have tags (safe incremental run).
+  // With overwrite: re-process all plants with photos to regenerate tags fresh.
+  if (!overwrite) {
+    query = query.or('search_tags.is.null,search_tags.eq.')
+  }
+
+  const { data: plants, error } = await query
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!plants || plants.length === 0) {
-    return NextResponse.json({ processed: 0, message: 'All plants already have tags.' })
+    return NextResponse.json({ processed: 0, message: 'No plants to process.' })
   }
 
   let processed = 0, failed = 0
@@ -80,7 +97,7 @@ export async function POST(request: NextRequest) {
         }
       )
       if (!res.ok) { failed++; continue }
-      const result = await res.json() as { responses: [{ labelAnnotations?: Array<{description:string;score:number}>; imagePropertiesAnnotation?: { dominantColors?: { colors?: Array<{color:{red:number;green:number;blue:number};score:number}> } } }] }
+      const result = await res.json() as { responses: [{ labelAnnotations?: Array<{description:string;score:number}>; imagePropertiesAnnotation?: { dominantColors?: { colors?: Array<{color:{red:number;green:number;blue:number};score:number;pixelFraction?:number}> } } }] }
       const labels = result.responses[0]?.labelAnnotations ?? []
       const colors = result.responses[0]?.imagePropertiesAnnotation?.dominantColors?.colors ?? []
       const tags = computeTags(labels, colors)
@@ -93,5 +110,5 @@ export async function POST(request: NextRequest) {
     } catch { failed++ }
   }
 
-  return NextResponse.json({ processed, failed, total: plants.length })
+  return NextResponse.json({ processed, failed, total: plants.length, overwrite })
 }

@@ -73,8 +73,12 @@ function computeSearchTags(
     const t = l.description.toLowerCase().trim()
     if (!SKIP_LABELS.has(t) && t.length > 2) tags.add(t)
   }
-  // Dominant colors (top 3 by score, deduplicated)
-  for (const c of colors.slice(0, 3)) {
+  // Dominant colors — only include if they cover ≥10% of image pixels.
+  // Vision sorts by `score` (saturation-weighted), not raw pixel area, so a
+  // tiny yellow highlight can outscore large neutral areas. pixelFraction is
+  // the ground truth for "this color is actually prominent in the photo".
+  for (const c of colors) {
+    if ((c.pixelFraction ?? 0) < 0.10) continue
     const name = rgbToColorName(c.color.red ?? 0, c.color.green ?? 0, c.color.blue ?? 0)
     if (name) tags.add(name)
   }
