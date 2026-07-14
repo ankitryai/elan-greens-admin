@@ -1,17 +1,20 @@
 // =============================================================================
 // Elan Greens Admin — Plant Species List (Server Component)
 //
-// Sorting is URL-driven (?sort=field&dir=asc|desc) so no client JS is needed.
-// Default sort: updated_at DESC (most recently changed first).
+// Two-column split: universal species data (name, category, photo) +
+// property-specific landmark tags (scoped to PROPERTY_ID).
+// When a second property is added, PROPERTY_ID switches per context and this
+// list automatically shows that property's landmark tags instead.
 // =============================================================================
 
 import Link from 'next/link'
-import { getAllSpecies, softDeleteSpecies, restoreSpecies } from '@/lib/queries'
+import { getAllSpecies, softDeleteSpecies, restoreSpecies, getLandmarkTagsForProperty } from '@/lib/queries'
 import { formatDateTime } from '@/lib/formatters'
-import { Badge } from '@/components/ui/badge'
 import { revalidatePath } from 'next/cache'
 import { PlantSearchInput } from '@/components/PlantSearchInput'
 import type { PlantSpecies } from '@/types'
+
+const PROPERTY_ID = 'elan'
 
 type SortField = 'plant_id' | 'common_name' | 'category' | 'updated_at'
 const VALID_SORTS: SortField[] = ['plant_id', 'common_name', 'category', 'updated_at']
@@ -22,7 +25,11 @@ export default async function PlantsPage({
   searchParams: Promise<{ q?: string; sort?: string; dir?: string }>
 }) {
   const { q = '', sort = 'updated_at', dir = 'desc' } = await searchParams
-  const allSpecies = await getAllSpecies()
+
+  const [allSpecies, landmarksBySpecies] = await Promise.all([
+    getAllSpecies(),
+    getLandmarkTagsForProperty(PROPERTY_ID),
+  ])
 
   const sortField: SortField = VALID_SORTS.includes(sort as SortField) ? (sort as SortField) : 'updated_at'
   const sortDir = dir === 'asc' ? 'asc' : 'desc'
@@ -31,15 +38,14 @@ export default async function PlantsPage({
     .filter(s => !q || s.common_name.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => {
       let aVal = '', bVal = ''
-      if      (sortField === 'plant_id')    { aVal = a.plant_id ?? '';     bVal = b.plant_id ?? '' }
-      else if (sortField === 'common_name') { aVal = a.common_name;        bVal = b.common_name }
-      else if (sortField === 'category')   { aVal = a.category;           bVal = b.category }
-      else                                  { aVal = a.updated_at ?? '';   bVal = b.updated_at ?? '' }
+      if      (sortField === 'plant_id')    { aVal = a.plant_id ?? '';   bVal = b.plant_id ?? '' }
+      else if (sortField === 'common_name') { aVal = a.common_name;      bVal = b.common_name }
+      else if (sortField === 'category')   { aVal = a.category;         bVal = b.category }
+      else                                  { aVal = a.updated_at ?? ''; bVal = b.updated_at ?? '' }
       const cmp = aVal.localeCompare(bVal)
       return sortDir === 'asc' ? cmp : -cmp
     })
 
-  // Server Actions — inline because they're specific to this page.
   async function deleteAction(formData: FormData) {
     'use server'
     const id = formData.get('id') as string
@@ -75,12 +81,10 @@ export default async function PlantsPage({
         </div>
       </div>
 
-      {/* Search — client-side debounce, triggers at 4+ chars, no Enter needed */}
       <PlantSearchInput defaultValue={q} sort={sortField} dir={sortDir} />
 
       <p className="text-sm text-gray-500">{filtered.length} species found</p>
 
-      {/* Species table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
@@ -89,7 +93,11 @@ export default async function PlantsPage({
               <th className="px-4 py-3 font-medium text-gray-600 text-center w-8">📷</th>
               <SortTh label="Common Name" field="common_name" sort={sortField} dir={sortDir} q={q} />
               <SortTh label="Category"    field="category"    sort={sortField} dir={sortDir} q={q} />
-              <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+              {/* Property-specific column — landmarks tagged at this property */}
+              <th className="text-left px-4 py-3 font-medium text-gray-600">
+                Landmarks
+                <span className="ml-1.5 text-[10px] font-normal text-gray-400 normal-case">Elan</span>
+              </th>
               <SortTh label="Updated"     field="updated_at"  sort={sortField} dir={sortDir} q={q} />
               <th className="text-left px-4 py-3 font-medium text-gray-600">Actions</th>
             </tr>
@@ -99,6 +107,7 @@ export default async function PlantsPage({
               <SpeciesRow
                 key={species.id}
                 species={species}
+                landmarks={landmarksBySpecies[species.id] ?? []}
                 deleteAction={deleteAction}
                 restoreAction={restoreAction}
               />
@@ -114,7 +123,7 @@ export default async function PlantsPage({
   )
 }
 
-// ── Sortable column header ───────────────────────────────────────────────────
+// ── Sortable column header ────────────────────────────────────────────────────
 
 function SortTh({
   label, field, sort, dir, q,
@@ -136,21 +145,26 @@ function SortTh({
   )
 }
 
-// ── Species row ──────────────────────────────────────────────────────────────
+// ── Species row ───────────────────────────────────────────────────────────────
 
 function SpeciesRow({
   species,
+  landmarks,
   deleteAction,
   restoreAction,
 }: {
   species: PlantSpecies
+  landmarks: { id: string; name: string }[]
   deleteAction: (f: FormData) => Promise<void>
   restoreAction: (f: FormData) => Promise<void>
 }) {
   const editHref = `/plants/${species.id}/edit`
+  const MAX_SHOWN = 2
+
   return (
     <tr className="hover:bg-gray-50">
-      {/* ID — clickable to edit */}
+
+      {/* ID */}
       <td className="px-4 py-3">
         <Link href={editHref} className="font-mono text-xs text-blue-600 hover:underline">
           {species.plant_id}
@@ -165,13 +179,25 @@ function SpeciesRow({
         }
       </td>
 
-      {/* Common name — clickable to edit */}
+      {/* Name — botanical + status badges folded in */}
       <td className="px-4 py-3">
-        <Link href={editHref} className="font-medium text-gray-900 hover:text-green-700 hover:underline">
-          {species.common_name}
-        </Link>
+        <div className="flex items-start gap-1.5 flex-wrap">
+          <Link href={editHref} className="font-medium text-gray-900 hover:text-green-700 hover:underline">
+            {species.common_name}
+          </Link>
+          {species.tentative && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200 leading-tight self-center">
+              TENTATIVE
+            </span>
+          )}
+          {!species.active && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 border border-gray-200 leading-tight self-center">
+              HIDDEN
+            </span>
+          )}
+        </div>
         {species.botanical_name && (
-          <span className="block text-xs text-gray-400 italic">{species.botanical_name}</span>
+          <span className="block text-xs text-gray-400 italic mt-0.5">{species.botanical_name}</span>
         )}
         {species.genus && (
           <span className="inline-block mt-0.5 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-mono">
@@ -187,19 +213,38 @@ function SpeciesRow({
         </span>
       </td>
 
-      {/* Status badges */}
+      {/* Landmarks — property-specific */}
       <td className="px-4 py-3">
-        {species.tentative && (
-          <Badge variant="outline" className="text-amber-600 border-amber-300 text-xs mr-1">
-            TENTATIVE
-          </Badge>
-        )}
-        {!species.active && (
-          <Badge variant="outline" className="text-gray-400 text-xs">HIDDEN</Badge>
+        {landmarks.length === 0 ? (
+          <Link
+            href={editHref}
+            className="text-xs text-amber-600 hover:underline hover:text-amber-700"
+          >
+            📍 Tag Landmarks
+          </Link>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {landmarks.slice(0, MAX_SHOWN).map(lm => (
+              <span
+                key={lm.id}
+                className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-100 leading-tight"
+              >
+                {lm.name}
+              </span>
+            ))}
+            {landmarks.length > MAX_SHOWN && (
+              <Link
+                href={editHref}
+                className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 leading-tight hover:bg-gray-200"
+              >
+                +{landmarks.length - MAX_SHOWN} more
+              </Link>
+            )}
+          </div>
         )}
       </td>
 
-      {/* Updated — with full datetime */}
+      {/* Updated */}
       <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
         {formatDateTime(species.updated_at)}
       </td>
@@ -209,9 +254,6 @@ function SpeciesRow({
         <div className="flex items-center gap-2">
           <Link href={editHref} className="text-blue-600 hover:underline text-xs">
             Edit
-          </Link>
-          <Link href={`/plants/${species.id}/locations`} className="text-green-700 hover:underline text-xs">
-            Locations
           </Link>
           {!species.deleted_at ? (
             <form action={deleteAction}>

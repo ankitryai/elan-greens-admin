@@ -488,6 +488,35 @@ export async function getLandmarkTagsForSpecies(speciesId: string): Promise<stri
   return (data ?? []).map(r => r.landmark_id)
 }
 
+// Returns a map of species_id → tagged landmarks for a property, in 2 queries.
+// Used by the plants list to show which landmarks each species is tagged to.
+export async function getLandmarkTagsForProperty(
+  propertyId = 'elan'
+): Promise<Record<string, { id: string; name: string }[]>> {
+  const db = createServiceRoleClient()
+  const { data: landmarks, error: lErr } = await db
+    .from('landmarks')
+    .select('id, name')
+    .eq('property_id', propertyId)
+  if (lErr || !landmarks || landmarks.length === 0) return {}
+
+  const landmarkNameById: Record<string, string> = {}
+  for (const l of landmarks) landmarkNameById[l.id] = l.name
+
+  const { data: tags, error: tErr } = await db
+    .from('plant_landmark_tags')
+    .select('species_id, landmark_id')
+    .in('landmark_id', landmarks.map(l => l.id))
+  if (tErr || !tags) return {}
+
+  const result: Record<string, { id: string; name: string }[]> = {}
+  for (const row of tags) {
+    if (!result[row.species_id]) result[row.species_id] = []
+    result[row.species_id].push({ id: row.landmark_id, name: landmarkNameById[row.landmark_id] ?? '' })
+  }
+  return result
+}
+
 // ── PLANT LOCATION INFO ───────────────────────────────────────────────────────
 
 export async function getPlantLocationInfoForSpecies(speciesId: string, propertyId = 'elan'): Promise<string | null> {
