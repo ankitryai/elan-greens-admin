@@ -217,7 +217,7 @@ function SpeciesRow({
       <td className="px-4 py-3">
         {landmarks.length === 0 ? (
           <Link
-            href={editHref}
+            href={`${editHref}#landmarks`}
             className="text-xs text-amber-600 hover:underline hover:text-amber-700"
           >
             📍 Tag Landmarks
@@ -234,7 +234,7 @@ function SpeciesRow({
             ))}
             {landmarks.length > MAX_SHOWN && (
               <Link
-                href={editHref}
+                href={`${editHref}#landmarks`}
                 className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 leading-tight hover:bg-gray-200"
               >
                 +{landmarks.length - MAX_SHOWN} more
