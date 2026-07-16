@@ -312,8 +312,8 @@ export default function AddSpeciesPage() {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Flowering Season">
-              <Input {...register('flowering_season')} placeholder="e.g. Year-round" />
+            <Field label="Flowering Season" error={errors.flowering_season?.message}>
+              <CharCountInput name="flowering_season" register={register} watch={watch} max={50} placeholder="e.g. Year-round" />
             </Field>
           </div>
         </section>
@@ -323,19 +323,31 @@ export default function AddSpeciesPage() {
           <h2 className="text-base font-semibold text-gray-700 border-b pb-2">3. Details (auto-filled from Plant.id)</h2>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Plant Family"><Input {...register('plant_family')} placeholder="e.g. Acanthaceae" /></Field>
-            <Field label="Genus">
-              <Input {...register('genus')} placeholder="e.g. Pseuderanthemum (auto-filled)" />
+            <Field label="Plant Family">
+              <CharCountInput name="plant_family" register={register} watch={watch} max={100} placeholder="e.g. Acanthaceae" />
             </Field>
-            <Field label="Toxicity"><Input {...register('toxicity')} placeholder="e.g. Non-toxic" /></Field>
-            <Field label="Edible Parts"><Input {...register('edible_parts')} placeholder="e.g. Leaves, fruit" /></Field>
-            <Field label="Native Region"><Input {...register('native_region')} placeholder="e.g. South Asia" /></Field>
-            <Field label="Sunlight"><Input {...register('sunlight_needs')} placeholder="e.g. Full Sun" /></Field>
-            <Field label="Watering"><Input {...register('watering_needs')} placeholder="e.g. Low" /></Field>
+            <Field label="Genus">
+              <CharCountInput name="genus" register={register} watch={watch} max={100} placeholder="e.g. Pseuderanthemum (auto-filled)" />
+            </Field>
+            <Field label="Toxicity" error={errors.toxicity?.message}>
+              <CharCountInput name="toxicity" register={register} watch={watch} max={50} placeholder="e.g. Non-toxic" />
+            </Field>
+            <Field label="Edible Parts">
+              <CharCountInput name="edible_parts" register={register} watch={watch} max={200} placeholder="e.g. Leaves, fruit" />
+            </Field>
+            <Field label="Native Region">
+              <CharCountInput name="native_region" register={register} watch={watch} max={150} placeholder="e.g. South Asia" />
+            </Field>
+            <Field label="Sunlight" error={errors.sunlight_needs?.message}>
+              <CharCountInput name="sunlight_needs" register={register} watch={watch} max={30} placeholder="e.g. Full Sun" />
+            </Field>
+            <Field label="Watering" error={errors.watering_needs?.message}>
+              <CharCountInput name="watering_needs" register={register} watch={watch} max={20} placeholder="e.g. Low" />
+            </Field>
           </div>
 
           <Field label="Lifespan" error={errors.life_span_description?.message}>
-            <Input {...register('life_span_description')} placeholder="e.g. 150–200 years" />
+            <CharCountInput name="life_span_description" register={register} watch={watch} max={100} placeholder="e.g. 150–200 years" />
           </Field>
 
           <Field label="Description" error={errors.description?.message}>
@@ -348,8 +360,8 @@ export default function AddSpeciesPage() {
               placeholder="Separate each property with | e.g. Treats fever | Reduces inflammation" />
           </Field>
 
-          <Field label="Interesting Fact">
-            <Input {...register('interesting_fact')} placeholder="One-liner fun fact for residents" />
+          <Field label="Interesting Fact" error={errors.interesting_fact?.message}>
+            <CharCountInput name="interesting_fact" register={register} watch={watch} max={300} placeholder="One-liner fun fact for residents" />
           </Field>
         </section>
 
@@ -373,7 +385,7 @@ export default function AddSpeciesPage() {
               </Select>
             </Field>
             <Field label="Conservation Status">
-              <Input {...register('conservation_status')} placeholder="e.g. Least Concern" />
+              <CharCountInput name="conservation_status" register={register} watch={watch} max={100} placeholder="e.g. Least Concern" />
             </Field>
             <Field label="Growth Rate">
               <Select onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}>
@@ -390,10 +402,10 @@ export default function AddSpeciesPage() {
             </Field>
           </div>
           <Field label="Propagation Methods">
-            <Input {...register('propagation_methods')} placeholder="e.g. Seeds|Stem cuttings|Division" />
+            <CharCountInput name="propagation_methods" register={register} watch={watch} max={200} placeholder="e.g. Seeds|Stem cuttings|Division" />
           </Field>
           <Field label="Habitat Type">
-            <Input {...register('habitat_type')} placeholder="e.g. Tropical dry forest, scrublands" />
+            <CharCountInput name="habitat_type" register={register} watch={watch} max={200} placeholder="e.g. Tropical dry forest, scrublands" />
           </Field>
         </section>
 
@@ -478,6 +490,27 @@ function Field({ label, error, children }: { label: string; error?: string; chil
   )
 }
 
+function CharCountInput({
+  name, register, watch, max, placeholder,
+}: {
+  name: keyof PlantSpeciesFormData
+  register: ReturnType<typeof useForm<PlantSpeciesFormData>>['register']
+  watch: ReturnType<typeof useForm<PlantSpeciesFormData>>['watch']
+  max: number
+  placeholder?: string
+}) {
+  const value = String(watch(name) ?? '')
+  const over  = value.length > max
+  return (
+    <div>
+      <Input {...register(name)} placeholder={placeholder} maxLength={max} />
+      <p className={`text-[11px] mt-0.5 text-right ${over ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+        {value.length} / {max}
+      </p>
+    </div>
+  )
+}
+
 function CharCountTextarea({
   name, register, setValue, watch, max, placeholder,
 }: {
@@ -491,7 +524,7 @@ function CharCountTextarea({
   const value = (watch(name) as string) ?? ''
   return (
     <div>
-      <Textarea {...register(name)} placeholder={placeholder} rows={3} />
+      <Textarea {...register(name)} placeholder={placeholder} rows={3} maxLength={max} />
       <p className={`text-xs mt-1 text-right ${value.length > max ? 'text-red-500' : 'text-gray-400'}`}>
         {value.length} / {max}
       </p>

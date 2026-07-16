@@ -1037,7 +1037,7 @@ export default function EditSpeciesForm({
               </Select>
             </Field>
             <Field label="Flowering Season" error={errors.flowering_season?.message}>
-              <CharCountInput name="flowering_season" register={register} watch={watch} max={150} />
+              <CharCountInput name="flowering_season" register={register} watch={watch} max={50} />
             </Field>
           </div>
         </section>
@@ -1054,7 +1054,7 @@ export default function EditSpeciesForm({
                 placeholder="auto-filled from botanical name" />
             </Field>
             <Field label="Toxicity">
-              <CharCountInput name="toxicity" register={register} watch={watch} max={200} />
+              <CharCountInput name="toxicity" register={register} watch={watch} max={50} />
             </Field>
             <Field label="Edible Parts">
               <CharCountInput name="edible_parts" register={register} watch={watch} max={200} />
@@ -1063,10 +1063,10 @@ export default function EditSpeciesForm({
               <CharCountInput name="native_region" register={register} watch={watch} max={150} />
             </Field>
             <Field label="Sunlight">
-              <CharCountInput name="sunlight_needs" register={register} watch={watch} max={100} />
+              <CharCountInput name="sunlight_needs" register={register} watch={watch} max={30} />
             </Field>
             <Field label="Watering">
-              <CharCountInput name="watering_needs" register={register} watch={watch} max={100} />
+              <CharCountInput name="watering_needs" register={register} watch={watch} max={20} />
             </Field>
           </div>
           <Field label="Lifespan">
@@ -1828,7 +1828,7 @@ function CharCountTextarea({
   const value = (watch(name) as string) ?? ''
   return (
     <div>
-      <Textarea {...register(name)} rows={3} />
+      <Textarea {...register(name)} rows={3} maxLength={max} />
       <p className={`text-xs mt-1 text-right ${value.length > max ? 'text-red-500' : 'text-gray-400'}`}>
         {value.length} / {max}
       </p>
@@ -1850,7 +1850,7 @@ function CharCountInput({
   const over  = value.length > max
   return (
     <div>
-      <Input {...register(name)} placeholder={placeholder} />
+      <Input {...register(name)} placeholder={placeholder} maxLength={max} />
       <p className={`text-[11px] mt-0.5 text-right ${over ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
         {value.length} / {max}
       </p>
