@@ -322,6 +322,30 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 
 `PlantSearchInput.tsx` has a mic button that uses Web Speech API (`en-IN` locale). Pattern repeated from consumer `PlantGrid.tsx`. SSR guard: `hasSpeech` is set in a `useEffect` (never on the server). Mic turns red + pulses while listening. The button is only rendered when `hasSpeech === true`.
 
+### Universal vs property-specific admin architecture
+
+The admin is evolving into two tiers:
+
+**Universal** (plant-level data, same across all properties):
+- Plant list (`/plants`) — species, photos, categories, botanical names
+- Species edit form — descriptions, search tags, sub-images
+- Settings — news sources, Vision, Plant.id
+
+**Property-specific** (scoped to a property, e.g. `elan`):
+- Landmarks — which areas exist in this property (`landmarks` table, `property_id='elan'`)
+- Landmark tags — which plants grow near which landmarks (`plant_landmark_tags`: `species_id + landmark_id`)
+- Plant location info — per-property free-text notes (`plant_location_info`: `species_id + property_id + location_info`)
+- Eventually: team members, property-specific photos, occurrence counts
+
+When adding a second property later: the Landmarks column in `/plants` and the map pins automatically reflect that property's data because `getLandmarkTagsForProperty(propertyId)` scopes the query.
+
+`PROPERTY_ID = 'elan'` is a constant at the top of `/plants/page.tsx`.
+
+### Key query functions (src/lib/queries.ts)
+- `getLandmarkTagsForProperty(propertyId)` → `Record<string, { id: string; name: string }[]>` — maps species_id to its tagged landmarks for a given property. Used in the plants list to show Landmarks column.
+- `getPlantLandmarkTags()` — returns all rows from `plant_landmark_tags` (used in map page).
+- `getPlantLocationInfo(propertyId)` — returns `plant_location_info` rows for a property (used as NLP location fallback on map).
+
 ### Supabase tables managed by admin app
 | Table | RLS read | Admin writes via |
 |---|---|---|
@@ -329,6 +353,9 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 | `plant_instances` | anon SELECT | API routes |
 | `staff_data` | anon SELECT | API routes |
 | `plant_species_links` | anon SELECT | API routes |
+| `landmarks` | anon SELECT | Admin UI (landmark management) |
+| `plant_landmark_tags` | anon SELECT | Edit form → Location section (landmark tagging UI) |
+| `plant_location_info` | anon SELECT | Edit form → Location section (per-property notes) |
 | `news_sources` | anon SELECT | Settings page Server Actions |
 | `app_settings` | anon SELECT | Settings page Server Actions |
 | `news_topic_queries` | anon SELECT | Settings page Server Actions |
@@ -413,6 +440,8 @@ Both must be set to **Public** in Supabase dashboard. Service role client is use
 
 28. **Web Speech API SSR guard.** `'SpeechRecognition' in window` crashes on the server. Always initialise `hasSpeech` in a `useEffect`, never in the initial `useState` call (or component body). Pattern: `const [hasSpeech, setHasSpeech] = useState(false)` + `useEffect(() => { setHasSpeech('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) }, [])`. Render the mic button only when `hasSpeech === true`.
 
-29. **Pending one-time ops after last session.** Two things still need doing manually:
-    - Run `supabase/search-tags-migration.sql` in Supabase SQL Editor (adds `search_tags` column)
-    - Visit `/plants/backfill` in the admin app and click "Run Backfill" to populate `search_tags` for all ~40 existing plants that have photos
+29. **Google Vision `score` ≠ pixel coverage — use `pixelFraction`.** Vision's `IMAGE_PROPERTIES` returns `score` (saturation-weighted, can be high for a tiny vivid area) and `pixelFraction` (actual proportion of image covered). Using `score` alone caused warm background tints to add "yellow" to unrelated plants. Fix: `if ((c.pixelFraction ?? 0) < 0.10) continue` in `computeSearchTags()`. This filter is required in BOTH `vision-fallback/route.ts` and `backfill-tags/route.ts`.
+
+30. **Backfill tags supports `overwrite: true`.** `POST /api/backfill-tags` with `{ overwrite: true }` re-processes ALL plants with photos (not just those missing tags). Use after fixing `computeSearchTags` logic so existing incorrect tags get corrected. Without `overwrite`, it only touches plants where `search_tags IS NULL OR search_tags = ''`.
+
+31. **Admin plants list Landmarks column is property-scoped.** The column shows `plant_landmark_tags` joined through `landmarks WHERE property_id = 'elan'`. Up to 2 landmark pills shown; overflow is a "+N more" link to `edit#landmarks`. Plants with no landmarks show a "📍 Tag Landmarks" link to the same anchor. The `id="landmarks"` attribute is on the Location `<section>` in `EditSpeciesForm.tsx`.
