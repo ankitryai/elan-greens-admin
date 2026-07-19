@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: '/plants',    label: 'Plants',      icon: '🌿' },
   { href: '/landmarks', label: 'Landmarks',   icon: '📍' },
   { href: '/staff',     label: 'Green Team',  icon: '👐' },
+  { href: '/feedback',  label: 'Feedback',    icon: '💬' },
   { href: '/settings',  label: 'Settings',    icon: '⚙️' },
 ] as const
 
