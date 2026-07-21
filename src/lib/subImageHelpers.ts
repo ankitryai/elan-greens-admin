@@ -44,6 +44,12 @@ export function hasAnySubImages(imgs: SubImages): boolean {
 /**
  * Flattens SubImages into the 20 flat DB column fields
  * (img_flower_1_url, img_flower_1_attr … img_root_2_attr).
+ *
+ * Writes an explicit null for every empty category. Correct for the Add
+ * form (a brand-new row has nothing to preserve) — do NOT use this for
+ * updating an existing row; use `buildSubImageFieldsForUpdate` instead,
+ * or a fetch that found nothing for e.g. "bark" will wipe out an existing
+ * saved bark photo.
  */
 export function buildSubImageFields(subImages: SubImages | null): Record<string, string | null> {
   if (!subImages) return {}
@@ -54,6 +60,29 @@ export function buildSubImageFields(subImages: SubImages | null): Record<string,
   ]
   for (const [prefix, key] of map) {
     const imgs = subImages[key]
+    f[`img_${prefix}_1_url`]  = imgs[0]?.url          ?? null
+    f[`img_${prefix}_1_attr`] = imgs[0]?.attribution  ?? null
+    f[`img_${prefix}_2_url`]  = imgs[1]?.url          ?? null
+    f[`img_${prefix}_2_attr`] = imgs[1]?.attribution  ?? null
+  }
+  return f
+}
+
+/**
+ * Same mapping as `buildSubImageFields`, but categories with zero fetched
+ * images are omitted entirely instead of written as null. Use this on the
+ * Edit form so a fetch that found nothing for a category never overwrites
+ * an existing saved image for that category (see CLAUDE.md lesson 6).
+ */
+export function buildSubImageFieldsForUpdate(subImages: SubImages): Record<string, string | null> {
+  const f: Record<string, string | null> = {}
+  const map: [string, ImagePartKey][] = [
+    ['flower', 'flowers'], ['fruit', 'fruits'],
+    ['leaf',   'leaves'],  ['bark',  'bark'],  ['root', 'roots'],
+  ]
+  for (const [prefix, key] of map) {
+    const imgs = subImages[key]
+    if (imgs.length === 0) continue
     f[`img_${prefix}_1_url`]  = imgs[0]?.url          ?? null
     f[`img_${prefix}_1_attr`] = imgs[0]?.attribution  ?? null
     f[`img_${prefix}_2_url`]  = imgs[1]?.url          ?? null

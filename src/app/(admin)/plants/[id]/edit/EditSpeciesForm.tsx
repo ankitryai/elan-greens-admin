@@ -29,13 +29,15 @@ import type { SubImages } from '@/components/ImageUploader'
 import type { PlantIdResult } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { ErrorBanner } from '@/components/ErrorBanner'
 import { incrementApiCount, getApiCount } from '@/components/ApiCounter'
 import type { FetchDebug, EnrichmentResult } from '@/types'
-import { sanitiseSubImages, hasAnySubImages } from '@/lib/subImageHelpers'
+import { sanitiseSubImages, hasAnySubImages, buildSubImageFieldsForUpdate } from '@/lib/subImageHelpers'
+import { Field, CharCountInput } from '@/components/PlantFormFields'
+import { PlantIdentitySection } from '@/components/PlantIdentitySection'
+import { PlantDetailsSection } from '@/components/PlantDetailsSection'
+import { usePopulateFromName } from '@/lib/usePopulateFromName'
 
 const PLANT_ID_LIMIT = 100
 
@@ -70,25 +72,6 @@ function compressToBase64(file: File): Promise<string> {
 
 type ManualEntry = { url: string; attr: string }
 
-// Only include categories that have actual new images — never null-out existing
-// DB values because the automated fetch found nothing for that category.
-function buildSubImageFields(subImages: SubImages): Record<string, string | null> {
-  const f: Record<string, string | null> = {}
-  const map: [string, keyof SubImages][] = [
-    ['flower', 'flowers'], ['fruit', 'fruits'],
-    ['leaf', 'leaves'],    ['bark', 'bark'], ['root', 'roots'],
-  ]
-  for (const [prefix, key] of map) {
-    const imgs = subImages[key]
-    if (imgs.length === 0) continue
-    f[`img_${prefix}_1_url`]  = imgs[0]?.url  ?? null
-    f[`img_${prefix}_1_attr`] = imgs[0]?.attribution ?? null
-    f[`img_${prefix}_2_url`]  = imgs[1]?.url  ?? null
-    f[`img_${prefix}_2_attr`] = imgs[1]?.attribution ?? null
-  }
-  return f
-}
-
 // Manual URL fields → flat DB columns. Only applied for categories where
 // the automated fetch returned nothing (fetched wins if both exist).
 function buildManualImageFields(
@@ -110,18 +93,6 @@ function buildManualImageFields(
   }
   return f
 }
-
-// Which categories already have at least one image saved?
-function filledCategories(s: PlantSpecies): string[] {
-  const filled: string[] = []
-  if (s.img_flower_1_url) filled.push('flowers')
-  if (s.img_fruit_1_url)  filled.push('fruits')
-  if (s.img_leaf_1_url)   filled.push('leaves')
-  if (s.img_bark_1_url)   filled.push('bark')
-  if (s.img_root_1_url)   filled.push('roots')
-  return filled
-}
-
 
 // ── Plant.id suggestion → form-ready fields ──────────────────────────────────
 interface IdentifySuggestion {
@@ -157,9 +128,6 @@ function extractSuggestion(result: PlantIdResult): IdentifySuggestion | null {
   }
 }
 
-const CATEGORIES = ['Tree','Palm','Shrub','Herb','Creeper','Climber','Hedge','Grass'] as const
-const HEIGHTS    = ['Short','Medium','Tall'] as const
-const FLOWERING  = ['Flowering','Non-Flowering'] as const
 const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
 const LINK_LABELS = ['Same genus', 'Variety / Cultivar', 'Same family', 'Related species'] as const
 
@@ -205,8 +173,6 @@ export default function EditSpeciesForm({
   const [enrichmentPreview, setEnrichmentPreview]   = useState<EnrichmentResult | null>(null)
 
   // "Populate from Name" — fires enrichment + images together (same as Add page)
-  const [populatingFromName, setPopulatingFromName] = useState(false)
-  const [populateStatus, setPopulateStatus]         = useState<string | null>(null)
 
   // Sub-image promoted to main photo when no main photo exists
   const [promotedToMain, setPromotedToMain] = useState<{ url: string; attr: string | null } | null>(null)
@@ -274,6 +240,17 @@ export default function EditSpeciesForm({
       habitat_type:          species.habitat_type          ?? '',
       tentative:             species.tentative,
       notes:                 species.notes                 ?? '',
+    },
+  })
+
+  const { populatingFromName, populateStatus, handlePopulateFromName } = usePopulateFromName({
+    mode: 'edit',
+    watch,
+    setValue,
+    commonName: species.common_name,
+    onImagesFetched: (imgs, debug) => {
+      setFetchedSubImages(imgs)
+      if (debug) setFetchDebug(debug)
     },
   })
 
@@ -469,59 +446,6 @@ export default function EditSpeciesForm({
     setEnrichmentPreview(null)
   }
 
-  // ── Populate from Name — enrichment + images in one click ────────────────
-  // Primary shortcut for legacy plants with only a name. Fires all free APIs
-  // in parallel; only fills fields that are currently empty; sets fetchDebug
-  // so genus-match warnings display correctly (same as standalone image fetch).
-  async function handlePopulateFromName() {
-    const botanical = (watch('botanical_name') ?? species.botanical_name ?? '').trim()
-    if (!botanical) {
-      toast.warning('Fill in the Botanical Name first.')
-      return
-    }
-    setPopulatingFromName(true)
-    setPopulateStatus('Fetching from GBIF · POWO · iNaturalist · IUCN · Wikimedia…')
-    try {
-      const [enrichRes, imageCount] = await Promise.all([
-        fetch(`/api/fetch-enrichment?name=${encodeURIComponent(botanical)}`),
-        applyImageFetch(botanical, species.common_name),  // shared core — sets fetchedSubImages + fetchDebug
-      ])
-      const filled: string[] = []
-
-      if (enrichRes.ok) {
-        const e = await enrichRes.json() as EnrichmentResult
-        const setIfEmpty = (field: keyof PlantSpeciesFormData, value: unknown): boolean => {
-          if (value === null || value === undefined || value === '') return false
-          const current = (watch(field) ?? '') as string
-          if (current.toString().trim()) return false
-          setValue(field, value as never)
-          return true
-        }
-        if (setIfEmpty('foliage_type',        e.foliage_type))        filled.push('Foliage')
-        if (setIfEmpty('conservation_status', e.conservation_status)) filled.push('Conservation')
-        if (e.observations_count != null && !watch('observations_count')) {
-          setValue('observations_count', e.observations_count)
-          filled.push('iNat Observations')
-        }
-        if (setIfEmpty('growth_rate',         e.growth_rate))         filled.push('Growth Rate')
-        if (setIfEmpty('propagation_methods', e.propagation_methods)) filled.push('Propagation')
-        if (setIfEmpty('habitat_type',        e.habitat_type))        filled.push('Habitat')
-      }
-
-      if (imageCount > 0) filled.push(`${imageCount} Images`)
-
-      setPopulateStatus(
-        filled.length > 0
-          ? `✅ Filled: ${filled.join(' · ')}. Review before saving.`
-          : `No data found for "${botanical}" — fill remaining fields manually.`
-      )
-    } catch {
-      setPopulateStatus('Fetch failed — check your connection and try again.')
-    } finally {
-      setPopulatingFromName(false)
-    }
-  }
-
   // ── Delete / restore saved DB images ─────────────────────────────────────
   function deleteSavedImage(cat: string, slot: 1 | 2) {
     setDeletedSaved(prev => new Set([...prev, `${cat}_${slot}`]))
@@ -580,7 +504,7 @@ export default function EditSpeciesForm({
       const imageFields = {
         ...deletedFields,                                                    // nulls lowest priority
         ...buildManualImageFields(manualImages, fetchedSubImages),           // manual next
-        ...(fetchedSubImages ? buildSubImageFields(fetchedSubImages) : {}),  // fresh fetch wins
+        ...(fetchedSubImages ? buildSubImageFieldsForUpdate(fetchedSubImages) : {}),  // fresh fetch wins
       }
       // Promote a sub-image to main photo if selected (only when no upload is staged)
       const mainPromotion = (!newImageBase64 && promotedToMain)
@@ -957,136 +881,26 @@ export default function EditSpeciesForm({
           )
         })()}
 
-        {/* ── Plant Identity ───────────────────────────────────────────────── */}
-        <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Plant Identity</h2>
+        <PlantIdentitySection
+          register={register}
+          watch={watch}
+          setValue={setValue}
+          errors={errors}
+          populatingFromName={populatingFromName}
+          populateStatus={populateStatus}
+          onPopulateFromName={handlePopulateFromName}
+          defaultCategory={species.category}
+          defaultHeight={species.height_category ?? ''}
+          defaultFlowering={species.flowering_type ?? ''}
+        />
 
-          <Field label="Common Name *" error={errors.common_name?.message}>
-            <Input {...register('common_name')} />
-          </Field>
-
-          <Field label="Botanical Name" error={errors.botanical_name?.message}>
-            <div className="flex gap-2 items-center">
-              <Input {...register('botanical_name')} className="flex-1" />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!watchedBotanical?.trim().includes(' ') || populatingFromName}
-                onClick={handlePopulateFromName}
-                className="shrink-0 text-xs text-green-700 border-green-300 hover:bg-green-50 disabled:opacity-40"
-                title="Fetch enrichment data and sub-images from free APIs using this botanical name"
-              >
-                {populatingFromName ? '⏳ Fetching…' : '🌿 Populate from Name'}
-              </Button>
-            </div>
-            {watchedBotanical && !watchedBotanical.includes(' ') && (
-              <p className="text-xs text-amber-500 mt-1">Enter the full two-word botanical name to enable.</p>
-            )}
-            {populateStatus && (
-              <p className={`text-xs mt-1.5 px-2.5 py-1.5 rounded-lg border ${
-                populateStatus.startsWith('✅')
-                  ? 'text-green-700 bg-green-50 border-green-100'
-                  : 'text-amber-700 bg-amber-50 border-amber-100'
-              }`}>
-                {populateStatus}
-              </p>
-            )}
-          </Field>
-
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Hindi"><Input {...register('hindi_name')} /></Field>
-            <Field label="Kannada"><Input {...register('kannada_name')} /></Field>
-            <Field label="Tamil"><Input {...register('tamil_name')} /></Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Category *" error={errors.category?.message}>
-              <Select
-                defaultValue={species.category}
-                onValueChange={v => setValue('category', v as PlantSpeciesFormData['category'])}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Height">
-              <Select
-                defaultValue={species.height_category ?? ''}
-                onValueChange={v => setValue('height_category', v as PlantSpeciesFormData['height_category'])}
-              >
-                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
-                <SelectContent>
-                  {HEIGHTS.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Flowering Type">
-              <Select
-                defaultValue={species.flowering_type ?? ''}
-                onValueChange={v => setValue('flowering_type', v as PlantSpeciesFormData['flowering_type'])}
-              >
-                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
-                <SelectContent>
-                  {FLOWERING.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Flowering Season" error={errors.flowering_season?.message}>
-              <CharCountInput name="flowering_season" register={register} watch={watch} max={50} />
-            </Field>
-          </div>
-        </section>
-
-        {/* ── Details ─────────────────────────────────────────────────────── */}
-        <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-700 border-b pb-2">Details</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Plant Family">
-              <CharCountInput name="plant_family" register={register} watch={watch} max={100} />
-            </Field>
-            <Field label="Genus">
-              <CharCountInput name="genus" register={register} watch={watch} max={100}
-                placeholder="auto-filled from botanical name" />
-            </Field>
-            <Field label="Toxicity">
-              <CharCountInput name="toxicity" register={register} watch={watch} max={50} />
-            </Field>
-            <Field label="Edible Parts">
-              <CharCountInput name="edible_parts" register={register} watch={watch} max={200} />
-            </Field>
-            <Field label="Native Region">
-              <CharCountInput name="native_region" register={register} watch={watch} max={150} />
-            </Field>
-            <Field label="Sunlight">
-              <CharCountInput name="sunlight_needs" register={register} watch={watch} max={30} />
-            </Field>
-            <Field label="Watering">
-              <CharCountInput name="watering_needs" register={register} watch={watch} max={20} />
-            </Field>
-          </div>
-          <Field label="Lifespan">
-            <CharCountInput name="life_span_description" register={register} watch={watch} max={100} />
-          </Field>
-          <Field label="Description" error={errors.description?.message}>
-            <CharCountTextarea name="description" register={register} setValue={setValue} watch={watch} max={500} />
-          </Field>
-          <Field label="Medicinal / Ecological Properties" error={errors.medicinal_properties?.message}>
-            <CharCountTextarea name="medicinal_properties" register={register} setValue={setValue} watch={watch} max={300} />
-          </Field>
-          <Field label="Interesting Fact">
-            <CharCountInput name="interesting_fact" register={register} watch={watch} max={300}
-              placeholder="A botanical curiosity — not location-specific" />
-            <p className="text-[10px] text-gray-400 mt-0.5">Global plant fact (unrelated to where it grows at any property)</p>
-          </Field>
-          <Field label="Internal Notes">
-            <CharCountInput name="notes" register={register} watch={watch} max={300} />
-          </Field>
-        </section>
+        <PlantDetailsSection
+          register={register}
+          watch={watch}
+          setValue={setValue}
+          errors={errors}
+          showNotes
+        />
 
         {/* ── Enrichment Data ──────────────────────────────────────────────── */}
         <section className="space-y-4">
@@ -1804,56 +1618,3 @@ export default function EditSpeciesForm({
   )
 }
 
-// ── Field wrapper ────────────────────────────────────────────────────────────
-function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-sm text-gray-700">{label}</Label>
-      {children}
-      {error && <p className="text-xs text-red-500">{error}</p>}
-    </div>
-  )
-}
-
-// ── Char-count textarea ──────────────────────────────────────────────────────
-function CharCountTextarea({
-  name, register, setValue, watch, max,
-}: {
-  name: keyof PlantSpeciesFormData
-  register: ReturnType<typeof useForm<PlantSpeciesFormData>>['register']
-  setValue: ReturnType<typeof useForm<PlantSpeciesFormData>>['setValue']
-  watch: ReturnType<typeof useForm<PlantSpeciesFormData>>['watch']
-  max: number
-}) {
-  const value = (watch(name) as string) ?? ''
-  return (
-    <div>
-      <Textarea {...register(name)} rows={3} maxLength={max} />
-      <p className={`text-xs mt-1 text-right ${value.length > max ? 'text-red-500' : 'text-gray-400'}`}>
-        {value.length} / {max}
-      </p>
-    </div>
-  )
-}
-
-// ── Char-count single-line input ─────────────────────────────────────────────
-function CharCountInput({
-  name, register, watch, max, placeholder,
-}: {
-  name: keyof PlantSpeciesFormData
-  register: ReturnType<typeof useForm<PlantSpeciesFormData>>['register']
-  watch: ReturnType<typeof useForm<PlantSpeciesFormData>>['watch']
-  max: number
-  placeholder?: string
-}) {
-  const value = String(watch(name) ?? '')
-  const over  = value.length > max
-  return (
-    <div>
-      <Input {...register(name)} placeholder={placeholder} maxLength={max} />
-      <p className={`text-[11px] mt-0.5 text-right ${over ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
-        {value.length} / {max}
-      </p>
-    </div>
-  )
-}
