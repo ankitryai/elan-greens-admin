@@ -37,7 +37,9 @@ import { sanitiseSubImages, hasAnySubImages, buildSubImageFieldsForUpdate } from
 import { Field, CharCountInput } from '@/components/PlantFormFields'
 import { PlantIdentitySection } from '@/components/PlantIdentitySection'
 import { PlantDetailsSection } from '@/components/PlantDetailsSection'
+import { AiGenerateSection } from '@/components/AiGenerateSection'
 import { usePopulateFromName } from '@/lib/usePopulateFromName'
+import { useGenerateWithAI } from '@/lib/useGenerateWithAI'
 
 const PLANT_ID_LIMIT = 100
 
@@ -252,6 +254,20 @@ export default function EditSpeciesForm({
       setFetchedSubImages(imgs)
       if (debug) setFetchDebug(debug)
     },
+  })
+
+  const {
+    generating: aiGenerating,
+    generateStatus: aiGenerateStatus,
+    lastResult: aiLastResult,
+    handleGenerateWithAI,
+    applyGeneratedResult,
+    dismissGeneratedResult,
+  } = useGenerateWithAI({
+    watch,
+    setValue,
+    imageBase64: newImageBase64,
+    imageUrl: species.img_main_url,
   })
 
   // ── Auto-fill genus from the first word of botanical name ─────────────────
@@ -892,6 +908,17 @@ export default function EditSpeciesForm({
           defaultCategory={species.category}
           defaultHeight={species.height_category ?? ''}
           defaultFlowering={species.flowering_type ?? ''}
+        />
+
+        <AiGenerateSection
+          watch={watch}
+          hasImage={!!(newImageBase64 || species.img_main_url)}
+          generating={aiGenerating}
+          generateStatus={aiGenerateStatus}
+          lastResult={aiLastResult}
+          onGenerate={handleGenerateWithAI}
+          onApply={applyGeneratedResult}
+          onDismiss={dismissGeneratedResult}
         />
 
         <PlantDetailsSection

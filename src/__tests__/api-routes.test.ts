@@ -44,11 +44,19 @@ vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ getAll: () => [], set: () => {} }),
 }))
 
+// generate-with-ai fetches verified plants for few-shot examples — stub to
+// an empty list by default so tests don't need real Supabase data.
+const mockGetAllSpecies = vi.fn().mockResolvedValue([])
+vi.mock('@/lib/queries', () => ({
+  getAllSpecies: () => mockGetAllSpecies(),
+}))
+
 // Set env vars used by route handlers
 process.env.SUPERADMIN_EMAIL        = 'ankitryai@gmail.com'
 process.env.GOOGLE_VISION_API_KEY   = 'test-vision-key'
 process.env.PLANT_ID_API_KEY        = 'test-plantid-key'
 process.env.IUCN_RED_LIST_API_KEY   = 'test-iucn-key'
+process.env.ANTHROPIC_API_KEY       = 'test-anthropic-key'
 process.env.NEXT_PUBLIC_SUPABASE_URL       = 'https://test.supabase.co'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY  = 'test-anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY      = 'test-service-key'
@@ -182,5 +190,100 @@ describe('/api/identify-plant', () => {
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.suggestions[0].plant_name).toBe('Ficus benghalensis')
+  })
+})
+
+// ── Generate with AI ────────────────────────────────────────────────────────
+
+describe('/api/generate-with-ai', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    mockGetAllSpecies.mockResolvedValue([])
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  async function callRoute(body: unknown) {
+    const { POST } = await import('@/app/api/generate-with-ai/route')
+    const req = new Request('http://localhost/api/generate-with-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return POST(req as never)
+  }
+
+  it('returns 401 when the caller is not the superadmin', async () => {
+    const original = mockUser.email
+    mockUser.email = 'someone-else@gmail.com'
+    try {
+      const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+      expect(res.status).toBe(401)
+    } finally {
+      mockUser.email = original
+    }
+  })
+
+  it('returns 400 when botanical name is missing or not a full binomial', async () => {
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 when common name is missing', async () => {
+    const res = await callRoute({ botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 502 when Claude API call fails', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockTextResponse('{"error":{"type":"overloaded_error"}}', 529)
+    )
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(502)
+    const json = await res.json()
+    expect(json.error).toMatch(/529/)
+  })
+
+  it('returns 502 when Claude response is not valid JSON', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({ content: [{ type: 'text', text: 'Sorry, I cannot help with that.' }] })
+    )
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(502)
+  })
+
+  it('returns 200 with sanitised fields on success', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            description: 'A fast-growing tree valued for shade and traditional medicine.',
+            plant_family: 'Meliaceae',
+            genus: 'Azadirachta',
+            malicious_field_should_be_dropped: 'hax',
+            _confidence: { description: 'high', plant_family: 'high', malicious_field_should_be_dropped: 'high' },
+          }),
+        }],
+      })
+    )
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.plant_family).toBe('Meliaceae')
+    expect(json.genus).toBe('Azadirachta')
+    expect(json.malicious_field_should_be_dropped).toBeUndefined()
+    expect(json._confidence.description).toBe('high')
+  })
+
+  it('strips markdown code fences from the model response before parsing', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({
+        content: [{ type: 'text', text: '```json\n{"genus": "Azadirachta", "_confidence": {}}\n```' }],
+      })
+    )
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.genus).toBe('Azadirachta')
   })
 })

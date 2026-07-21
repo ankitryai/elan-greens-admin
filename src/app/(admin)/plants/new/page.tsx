@@ -21,8 +21,10 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Field, CharCountInput } from '@/components/PlantFormFields'
 import { usePopulateFromName } from '@/lib/usePopulateFromName'
+import { useGenerateWithAI } from '@/lib/useGenerateWithAI'
 import { PlantIdentitySection } from '@/components/PlantIdentitySection'
 import { PlantDetailsSection } from '@/components/PlantDetailsSection'
+import { AiGenerateSection } from '@/components/AiGenerateSection'
 import type { WikimediaImage } from '@/types'
 import type { ImagePartKey } from '@/lib/subImageHelpers'
 const IMG_PARTS  = ['flowers','fruits','leaves','bark','roots'] as const
@@ -46,9 +48,18 @@ export default function AddSpeciesPage() {
     mode: 'create',
     watch,
     setValue,
-    commonName: '',
+    commonName: watch('common_name') ?? '',
     onImagesFetched: imgs => { if (hasAnySubImages(imgs)) setSubImages(imgs) },
   })
+
+  const {
+    generating: aiGenerating,
+    generateStatus: aiGenerateStatus,
+    lastResult: aiLastResult,
+    handleGenerateWithAI,
+    applyGeneratedResult,
+    dismissGeneratedResult,
+  } = useGenerateWithAI({ watch, setValue, imageBase64 })
 
   // Auto-fill genus from the first word of botanical name when genus is empty
   const watchedBotanical = watch('botanical_name')
@@ -201,6 +212,17 @@ export default function AddSpeciesPage() {
           populateStatus={populateStatus}
           onPopulateFromName={handlePopulateFromName}
           heading="2. Plant Identity"
+        />
+
+        <AiGenerateSection
+          watch={watch}
+          hasImage={!!imageBase64}
+          generating={aiGenerating}
+          generateStatus={aiGenerateStatus}
+          lastResult={aiLastResult}
+          onGenerate={handleGenerateWithAI}
+          onApply={applyGeneratedResult}
+          onDismiss={dismissGeneratedResult}
         />
 
         <PlantDetailsSection

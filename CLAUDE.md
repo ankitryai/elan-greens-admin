@@ -231,6 +231,43 @@ bark / roots                  → no annotation (general search)
 - Fields filled: `foliage_type`, `conservation_status`, `observations_count`, `growth_rate`, `propagation_methods`, `habitat_type`
 - Always call both `/api/fetch-enrichment` and `/api/fetch-images` in `Promise.all` — two parallel fetches, one status message
 
+### Generate with AI (Claude)
+
+`POST /api/generate-with-ai` — given a botanical name + common name (+ optional photo), asks Claude to draft
+the remaining descriptive fields so the admin edits rather than types from scratch. Available on both the
+**Add** page and the **Edit** form, next to the Populate-from-Name section.
+
+- Requires botanical name to be a full two-word binomial (same gate as Populate from Name) — it's the
+  grounding key that disambiguates species sharing a common name.
+- Generates: `hindi_name, kannada_name, tamil_name, category, height_category, flowering_type,
+  flowering_season, description, medicinal_properties, plant_family, genus, toxicity, edible_parts,
+  native_region, sunlight_needs, watering_needs, interesting_fact, life_span_description` — the full list is
+  `AI_GENERATE_FIELDS` in `src/types/index.ts`, single source of truth shared by the route, the sanitiser, and
+  the apply logic.
+- **Deliberately does NOT generate** `foliage_type, conservation_status, growth_rate, propagation_methods,
+  habitat_type` — those are already covered by the free GBIF/POWO/iNaturalist/IUCN enrichment pipeline
+  (see above), which is more reliable for that specific data than an LLM guess would be.
+- **Few-shot examples for format only, never facts**: pulls up to 4 already-`VERIFIED` (non-tentative) plants
+  via `getAllSpecies()` to show Claude the expected tone/field format. The prompt explicitly tells it not to
+  borrow facts from these examples — a new species' description must come from the model's own knowledge of
+  that exact species.
+- **Per-field confidence**: the model is asked to return `high | medium | low` per field alongside the value.
+  Local names and medicinal claims are explicitly flagged in the prompt as the fields most prone to
+  hallucination/overclaiming — the admin UI surfaces confidence as a coloured badge per row.
+- **Image handling**: the Add page sends a freshly-staged photo as `imageBase64` (data URL). The Edit form
+  prefers a freshly-staged replacement photo, but falls back to the *existing saved* `species.img_main_url` via
+  `imageUrl` — the route fetches and base64-encodes it server-side, since Anthropic's Messages API image
+  source only accepts base64 (unlike Google Vision's `imageUri` — see lesson 27, which is Vision-specific).
+- **Always fill-empty-only, always TENTATIVE**: mirrors the Populate-from-Name / Plant.id apply pattern —
+  "Fill empty fields only (safe)" vs an explicit-confirm "Overwrite all". Generating a draft sets
+  `tentative: true` on the form; it never touches the DB directly, the admin still reviews and clicks Save.
+- Sanitisation lives in `src/lib/aiGenerate.ts` (`sanitiseAiGenerateResult`) — never trusts the model's raw
+  JSON shape, picks only known `AI_GENERATE_FIELDS` keys and coerces everything else to `null`, same rule as
+  `sanitiseSubImages()`. Tested in `src/__tests__/aiGenerate.test.ts`.
+- Calls the Claude Messages API directly via `fetch` (wrapped in `timedFetch('anthropic_claude', ...)`, logged
+  to `api_logs` like every other external call) — no `@anthropic-ai/sdk` dependency, consistent with the rest
+  of this codebase which uses raw `fetch` for every external API.
+
 ### Plant.id / Google Vision identification
 
 **Credit limits (hard constraints — never change these):**
@@ -373,6 +410,7 @@ When adding a second property later: the Landmarks column in `/plants` and the m
 | `SUPERADMIN_EMAIL` | Yes | Only this email can log in |
 | `PLANT_ID_API_KEY` | Yes | Plant.id identification API |
 | `GOOGLE_VISION_API_KEY` | Yes | Fallback vision API |
+| `ANTHROPIC_API_KEY` | Yes | Claude API — powers "Generate with AI" plant-field drafting |
 
 `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env.local` for local dev only (corporate SSL issue).
 
