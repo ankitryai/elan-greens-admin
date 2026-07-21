@@ -56,7 +56,7 @@ process.env.SUPERADMIN_EMAIL        = 'ankitryai@gmail.com'
 process.env.GOOGLE_VISION_API_KEY   = 'test-vision-key'
 process.env.PLANT_ID_API_KEY        = 'test-plantid-key'
 process.env.IUCN_RED_LIST_API_KEY   = 'test-iucn-key'
-process.env.ANTHROPIC_API_KEY       = 'test-anthropic-key'
+process.env.LLM_API_KEY             = 'test-llm-key'
 process.env.NEXT_PUBLIC_SUPABASE_URL       = 'https://test.supabase.co'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY  = 'test-anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY      = 'test-service-key'
@@ -233,19 +233,19 @@ describe('/api/generate-with-ai', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 502 when Claude API call fails', async () => {
+  it('returns 502 when the LLM API call fails', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      mockTextResponse('{"error":{"type":"overloaded_error"}}', 529)
+      mockTextResponse('{"error":{"message":"model overloaded"}}', 503)
     )
     const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
     expect(res.status).toBe(502)
     const json = await res.json()
-    expect(json.error).toMatch(/529/)
+    expect(json.error).toMatch(/503/)
   })
 
-  it('returns 502 when Claude response is not valid JSON', async () => {
+  it('returns 502 when the LLM response is not valid JSON', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      mockResponse({ content: [{ type: 'text', text: 'Sorry, I cannot help with that.' }] })
+      mockResponse({ choices: [{ message: { content: 'Sorry, I cannot help with that.' } }] })
     )
     const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
     expect(res.status).toBe(502)
@@ -254,15 +254,16 @@ describe('/api/generate-with-ai', () => {
   it('returns 200 with sanitised fields on success', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       mockResponse({
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            description: 'A fast-growing tree valued for shade and traditional medicine.',
-            plant_family: 'Meliaceae',
-            genus: 'Azadirachta',
-            malicious_field_should_be_dropped: 'hax',
-            _confidence: { description: 'high', plant_family: 'high', malicious_field_should_be_dropped: 'high' },
-          }),
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              description: 'A fast-growing tree valued for shade and traditional medicine.',
+              plant_family: 'Meliaceae',
+              genus: 'Azadirachta',
+              malicious_field_should_be_dropped: 'hax',
+              _confidence: { description: 'high', plant_family: 'high', malicious_field_should_be_dropped: 'high' },
+            }),
+          },
         }],
       })
     )
@@ -277,13 +278,56 @@ describe('/api/generate-with-ai', () => {
 
   it('strips markdown code fences from the model response before parsing', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      mockResponse({
-        content: [{ type: 'text', text: '```json\n{"genus": "Azadirachta", "_confidence": {}}\n```' }],
-      })
+      mockResponse({ choices: [{ message: { content: '```json\n{"genus": "Azadirachta", "_confidence": {}}\n```' } }] })
     )
     const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.genus).toBe('Azadirachta')
+  })
+
+  it('proceeds text-only when no LLM_VISION_API_KEY is configured, even with a photo', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({ choices: [{ message: { content: '{"genus": "Azadirachta", "_confidence": {}}' } }] })
+    )
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica', imageBase64: 'data:image/jpeg;base64,abc' })
+    expect(res.status).toBe(200)
+    // Only one fetch call (text model) — no vision call attempted without a key.
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls the vision model first, then folds its description into the text prompt', async () => {
+    process.env.LLM_VISION_API_KEY = 'test-vision-key'
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockResponse({ choices: [{ message: { content: 'Compound leaves, grey fissured bark.' } }] }))
+        .mockResolvedValueOnce(mockResponse({ choices: [{ message: { content: '{"genus": "Azadirachta", "_confidence": {}}' } }] }))
+
+      const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica', imageBase64: 'data:image/jpeg;base64,abc' })
+      expect(res.status).toBe(200)
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
+
+      const textCallBody = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string)
+      const userMessage = textCallBody.messages.find((m: { role: string }) => m.role === 'user')
+      expect(userMessage.content).toMatch(/Compound leaves, grey fissured bark\./)
+    } finally {
+      delete process.env.LLM_VISION_API_KEY
+    }
+  })
+
+  it('still returns a draft when the vision call fails (non-fatal)', async () => {
+    process.env.LLM_VISION_API_KEY = 'test-vision-key'
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockTextResponse('Internal Server Error', 500))
+        .mockResolvedValueOnce(mockResponse({ choices: [{ message: { content: '{"genus": "Azadirachta", "_confidence": {}}' } }] }))
+
+      const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica', imageBase64: 'data:image/jpeg;base64,abc' })
+      expect(res.status).toBe(200)
+      const json = await res.json()
+      expect(json.genus).toBe('Azadirachta')
+    } finally {
+      delete process.env.LLM_VISION_API_KEY
+    }
   })
 })

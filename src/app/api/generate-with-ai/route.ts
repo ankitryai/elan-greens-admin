@@ -1,11 +1,21 @@
 // =============================================================================
 // Elan Greens Admin — "Generate with AI" Route Handler
 //
-// Given a photo + common name + botanical name, asks Claude to draft the
-// remaining plant-form fields (description, uses, local names, etc.) so the
-// admin only has to review and correct rather than type from scratch.
-// Generated data is always TENTATIVE until an admin publishes it — this route
-// never writes to the DB, it only returns a draft for the form to pre-fill.
+// Given a photo + common name + botanical name, drafts the remaining
+// plant-form fields (description, uses, local names, etc.) so the admin only
+// has to review and correct rather than type from scratch. Generated data is
+// always TENTATIVE until an admin publishes it — this route never writes to
+// the DB, it only returns a draft for the form to pre-fill.
+//
+// Two separate OpenAI-compatible chat-completions providers, both swappable
+// via env vars with no code change (provider-agnostic on purpose — started
+// on a free Kimi K2 text tier, may move providers as free-tier limits shift):
+//   1. Text drafting  — LLM_API_KEY        (default: Moonshot Kimi K2)
+//   2. Photo → visual description — LLM_VISION_API_KEY (default: NVIDIA NIM)
+// The vision step is optional and independent: it turns a photo into a plain
+// text visual description, which then becomes one more input to the text
+// model. If no photo or no vision key is configured, generation proceeds
+// text-only from the botanical + common name.
 //
 // The botanical name is the grounding key: it disambiguates species that
 // share a common name (e.g. two different plants both called "Jasmine").
@@ -20,16 +30,53 @@ import { timedFetch } from '@/lib/apiLogger'
 import { AI_GENERATE_FIELDS } from '@/types'
 import { sanitiseAiGenerateResult, buildFewShotExamples } from '@/lib/aiGenerate'
 
-const CLAUDE_MODEL = 'claude-sonnet-5'
+const LLM_API_BASE_URL        = process.env.LLM_API_BASE_URL        ?? 'https://api.moonshot.ai/v1'
+const LLM_MODEL                = process.env.LLM_MODEL               ?? 'kimi-k2-0711-preview'
+const LLM_VISION_API_BASE_URL = process.env.LLM_VISION_API_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
+const LLM_VISION_MODEL         = process.env.LLM_VISION_MODEL         ?? 'meta/llama-3.2-90b-vision-instruct'
 
-function parseDataUrl(dataUrl: string): { mediaType: string; data: string } | null {
-  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(dataUrl)
-  if (!match) return null
-  return { mediaType: match[1], data: match[2] }
+function hostnameOf(url: string): string {
+  try { return new URL(url).hostname } catch { return url }
+}
+
+/** Turns a photo into a plain-text visual description via an OpenAI-compatible vision model. Returns null on any failure — vision is a nice-to-have, never blocks text generation. */
+async function describeImage(imageUrlOrDataUri: string): Promise<string | null> {
+  const apiKey = process.env.LLM_VISION_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const response = await timedFetch(
+      'llm_vision',
+      hostnameOf(LLM_VISION_API_BASE_URL),
+      () => fetch(`${LLM_VISION_API_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: LLM_VISION_MODEL,
+          max_tokens: 400,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Objectively describe this plant photo for a botanical catalogue: leaf shape and arrangement, bark texture and colour, flower colour and form if visible, fruit if visible, overall growth habit. Plain prose, no speculation about species identity, 3-4 sentences.' },
+              { type: 'image_url', image_url: { url: imageUrlOrDataUri } },
+            ],
+          }],
+        }),
+      })
+    )
+    if (!response.ok) return null
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
+    return payload.choices?.[0]?.message?.content?.trim() || null
+  } catch {
+    return null
+  }
 }
 
 export async function POST(request: NextRequest) {
-  // Auth — only superadmin may trigger a (paid) Claude API call.
+  // Auth — only superadmin may trigger these (rate-limited free-tier) API calls.
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user || user.email !== process.env.SUPERADMIN_EMAIL) {
@@ -47,9 +94,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.LLM_API_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY is not configured on the server.' }, { status: 502 })
+    return NextResponse.json({ error: 'LLM_API_KEY is not configured on the server.' }, { status: 502 })
   }
 
   // Few-shot examples from already-verified plants — format grounding only.
@@ -61,27 +108,14 @@ export async function POST(request: NextRequest) {
     // Non-fatal — proceed without examples rather than failing the whole request.
   }
 
-  let image = body.imageBase64 ? parseDataUrl(body.imageBase64) : null
-  // Edit form passes the saved photo's public Storage URL rather than re-encoding
-  // it client-side — fetch and base64-encode it server-side (Anthropic's Messages
-  // API image source only supports base64, unlike Vision's imageUri).
-  if (!image && body.imageUrl) {
-    try {
-      const imgRes = await fetch(body.imageUrl)
-      if (imgRes.ok) {
-        const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg'
-        if (/^image\/(jpeg|png|webp)$/.test(contentType)) {
-          const buf = Buffer.from(await imgRes.arrayBuffer())
-          image = { mediaType: contentType, data: buf.toString('base64') }
-        }
-      }
-    } catch {
-      // Non-fatal — proceed text-only rather than failing the whole request.
-    }
-  }
+  // Vision step is independent of the text provider — pass either a fresh
+  // data URI or the saved photo's public Storage URL straight through
+  // (OpenAI-compatible image_url accepts both, no server-side re-encoding needed).
+  const imageInput = body.imageBase64 || body.imageUrl || null
+  const visualDescription = imageInput ? await describeImage(imageInput) : null
 
   const systemPrompt = `You are drafting plant directory entries for a residential society's plant catalogue.
-Given a botanical name, common name, and optionally a photo, fill in the remaining fields below.
+Given a botanical name, common name, and optionally a visual description of a photo, fill in the remaining fields below.
 
 The botanical name is the grounding key — base every fact on that exact species, not on the common name alone
 (different species can share a common name). If you are not confident about a field, still make your best
@@ -103,31 +137,28 @@ Fields to generate: ${AI_GENERATE_FIELDS.join(', ')}.
 Respond with ONLY a single JSON object, no prose, no markdown fences, in this exact shape:
 { ${AI_GENERATE_FIELDS.map(f => `"${f}": string | null`).join(', ')}, "_confidence": { "<field>": "high" | "medium" | "low", ... } }`
 
-  const userContent: Array<Record<string, unknown>> = [
-    { type: 'text', text: `Common name: ${commonName}\nBotanical name: ${botanicalName}` },
-  ]
-  if (image) {
-    userContent.unshift({
-      type: 'image',
-      source: { type: 'base64', media_type: image.mediaType, data: image.data },
-    })
-  }
+  const userText = [
+    `Common name: ${commonName}`,
+    `Botanical name: ${botanicalName}`,
+    visualDescription ? `Photo description: ${visualDescription}` : null,
+  ].filter(Boolean).join('\n')
 
   const response = await timedFetch(
-    'anthropic_claude',
-    'api.anthropic.com',
-    () => fetch('https://api.anthropic.com/v1/messages', {
+    'llm_text',
+    hostnameOf(LLM_API_BASE_URL),
+    () => fetch(`${LLM_API_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL,
+        model: LLM_MODEL,
         max_tokens: 1500,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userText },
+        ],
       }),
     }),
     { botanical_name: botanicalName }
@@ -136,15 +167,15 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
   if (!response.ok) {
     const text = await response.text()
     return NextResponse.json(
-      { error: `Claude API error: ${response.status} ${text}` },
+      { error: `LLM API error: ${response.status} ${text}` },
       { status: 502 }
     )
   }
 
-  const payload = await response.json() as { content?: Array<{ type: string; text?: string }> }
-  const textBlock = payload.content?.find(b => b.type === 'text')?.text
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
+  const textBlock = payload.choices?.[0]?.message?.content
   if (!textBlock) {
-    return NextResponse.json({ error: 'Claude returned no text content.' }, { status: 502 })
+    return NextResponse.json({ error: 'LLM returned no text content.' }, { status: 502 })
   }
 
   let parsed: unknown
@@ -153,7 +184,7 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
     const cleaned = textBlock.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
     parsed = JSON.parse(cleaned)
   } catch {
-    return NextResponse.json({ error: 'Claude response was not valid JSON.' }, { status: 502 })
+    return NextResponse.json({ error: 'LLM response was not valid JSON.' }, { status: 502 })
   }
 
   const result = sanitiseAiGenerateResult(parsed)
