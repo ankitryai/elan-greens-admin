@@ -183,7 +183,15 @@ kind before or after it — your entire response must start with { and end with 
         },
         body: JSON.stringify({
           model: LLM_MODEL,
-          max_tokens: 1500,
+          // 17 fields + confidence map is a lot of JSON, and reasoning models
+          // spend part of the budget on hidden reasoning before the actual
+          // answer — 1500 was cutting the response off mid-JSON (valid start,
+          // then an incomplete/truncated object). 4096 leaves real headroom.
+          max_tokens: 4096,
+          // Best-effort: OpenRouter's unified reasoning control. Ignored by
+          // providers/models that don't support it; for ones that do, this
+          // frees up more of max_tokens for the actual JSON answer.
+          reasoning: { enabled: false },
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText },
