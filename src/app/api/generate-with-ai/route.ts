@@ -34,7 +34,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getAllSpecies } from '@/lib/queries'
 import { timedFetch } from '@/lib/apiLogger'
 import { AI_GENERATE_FIELDS } from '@/types'
-import { sanitiseAiGenerateResult, buildFewShotExamples } from '@/lib/aiGenerate'
+import { sanitiseAiGenerateResult, buildFewShotExamples, extractJsonObject } from '@/lib/aiGenerate'
 
 // Ask Vercel for the longest function duration the plan allows — free-tier
 // LLM providers can be slow, and a plain 10s Hobby default was cutting these
@@ -85,7 +85,7 @@ async function describeImage(imageUrlOrDataUri: string): Promise<string | null> 
             ],
           }],
         }),
-      }, 15_000)
+      }, 25_000)
     )
     if (!response.ok) return null
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
@@ -154,7 +154,8 @@ Fields to generate: ${AI_GENERATE_FIELDS.join(', ')}.
 - medicinal_properties: pipe-separated short claims, e.g. "Treats fever|Reduces inflammation" (be conservative — this is the field most prone to overclaiming)
 - Local names (hindi_name, kannada_name, tamil_name): regional variants exist and you can hallucinate here — mark confidence low unless well known
 
-Respond with ONLY a single JSON object, no prose, no markdown fences, in this exact shape:
+Respond with ONLY a single JSON object, no prose, no markdown fences, no reasoning or thinking output of any
+kind before or after it — your entire response must start with { and end with }, in this exact shape:
 { ${AI_GENERATE_FIELDS.map(f => `"${f}": string | null`).join(', ')}, "_confidence": { "<field>": "high" | "medium" | "low", ... } }`
 
   const userText = [
@@ -188,13 +189,13 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
             { role: 'user', content: userText },
           ],
         }),
-      }, 40_000),
+      }, 30_000),
       { botanical_name: botanicalName }
     )
   } catch (err) {
     const timedOut = err instanceof Error && err.name === 'AbortError'
     return NextResponse.json(
-      { error: timedOut ? 'LLM API timed out after 40s — the provider may be overloaded, try again.' : `LLM API request failed: ${err instanceof Error ? err.message : String(err)}` },
+      { error: timedOut ? 'LLM API timed out after 30s — the provider may be overloaded, try again.' : `LLM API request failed: ${err instanceof Error ? err.message : String(err)}` },
       { status: 502 }
     )
   }
@@ -215,11 +216,16 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
 
   let parsed: unknown
   try {
-    // Model is instructed to return raw JSON, but strip markdown fences defensively.
-    const cleaned = textBlock.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    parsed = JSON.parse(cleaned)
+    parsed = extractJsonObject(textBlock)
   } catch {
-    return NextResponse.json({ error: 'LLM response was not valid JSON.' }, { status: 502 })
+    // Include a snippet of the raw response — reasoning models in particular
+    // can ignore "JSON only" instructions in ways worth seeing directly
+    // rather than guessing blind from the admin UI.
+    const snippet = textBlock.slice(0, 300)
+    return NextResponse.json(
+      { error: `LLM response was not valid JSON. First 300 chars: ${snippet}` },
+      { status: 502 }
+    )
   }
 
   const result = sanitiseAiGenerateResult(parsed)

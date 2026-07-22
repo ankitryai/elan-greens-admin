@@ -42,6 +42,32 @@ export function hasAnyGeneratedField(result: AiGenerateResult): boolean {
 }
 
 /**
+ * Parses a JSON object out of a raw LLM text response, tolerating the ways
+ * models commonly fail to return "ONLY JSON" even when explicitly told to:
+ *  - reasoning models (e.g. Nemotron) prepending a <think>...</think> block
+ *  - markdown code fences around the JSON
+ *  - a sentence or two of prose before/after the JSON object
+ * Throws if no valid JSON object can be recovered — caller decides how to
+ * surface that as an error.
+ */
+export function extractJsonObject(text: string): unknown {
+  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+
+  try {
+    return JSON.parse(cleaned)
+  } catch {
+    // Fall back to the outermost {...} span — handles stray prose around the JSON.
+    const start = cleaned.indexOf('{')
+    const end = cleaned.lastIndexOf('}')
+    if (start === -1 || end <= start) {
+      throw new Error('No JSON object found in LLM response')
+    }
+    return JSON.parse(cleaned.slice(start, end + 1))
+  }
+}
+
+/**
  * Builds a small set of few-shot examples from already-verified plants —
  * grounds the model's output format/tone, not its facts (a new species'
  * description should come from the model's own knowledge of that species,

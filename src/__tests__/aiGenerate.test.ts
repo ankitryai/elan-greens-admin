@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { describe, it, expect } from 'vitest'
-import { sanitiseAiGenerateResult, hasAnyGeneratedField, buildFewShotExamples } from '@/lib/aiGenerate'
+import { sanitiseAiGenerateResult, hasAnyGeneratedField, buildFewShotExamples, extractJsonObject } from '@/lib/aiGenerate'
 import { AI_GENERATE_FIELDS } from '@/types'
 import type { PlantSpecies } from '@/types'
 
@@ -133,5 +133,40 @@ describe('buildFewShotExamples', () => {
     const species = Array.from({ length: 10 }, (_, i) => makeSpecies({ common_name: `Plant ${i}`, tentative: false }))
     const examples = buildFewShotExamples(species, 2)
     expect(examples.split('\n')).toHaveLength(2)
+  })
+})
+
+// ── extractJsonObject ─────────────────────────────────────────────────────────
+
+describe('extractJsonObject', () => {
+  it('parses a clean JSON object as-is', () => {
+    expect(extractJsonObject('{"genus": "Azadirachta"}')).toEqual({ genus: 'Azadirachta' })
+  })
+
+  it('strips markdown code fences', () => {
+    expect(extractJsonObject('```json\n{"genus": "Azadirachta"}\n```')).toEqual({ genus: 'Azadirachta' })
+  })
+
+  it('strips a <think>...</think> reasoning block from reasoning models', () => {
+    const text = '<think>Let me consider the taxonomy here...</think>\n{"genus": "Azadirachta"}'
+    expect(extractJsonObject(text)).toEqual({ genus: 'Azadirachta' })
+  })
+
+  it('extracts JSON embedded in surrounding prose', () => {
+    const text = 'Sure, here is the plant data:\n{"genus": "Azadirachta"}\nLet me know if you need more.'
+    expect(extractJsonObject(text)).toEqual({ genus: 'Azadirachta' })
+  })
+
+  it('handles a reasoning block plus trailing prose together', () => {
+    const text = '<think>reasoning...</think>\nHere you go: {"genus": "Azadirachta"} Hope that helps!'
+    expect(extractJsonObject(text)).toEqual({ genus: 'Azadirachta' })
+  })
+
+  it('throws when no JSON object is present at all', () => {
+    expect(() => extractJsonObject('Sorry, I cannot help with that.')).toThrow()
+  })
+
+  it('throws when the extracted braces do not contain valid JSON', () => {
+    expect(() => extractJsonObject('{not: valid, json}')).toThrow()
   })
 })
