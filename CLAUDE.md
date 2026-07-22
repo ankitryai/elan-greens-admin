@@ -241,20 +241,28 @@ the **Edit** form, next to the Populate-from-Name section.
 
 | Purpose | Env vars | Default provider/model |
 |---|---|---|
-| Text drafting | `LLM_API_KEY` (required), `LLM_API_BASE_URL`, `LLM_MODEL` | OpenRouter's free Kimi K2 — `https://openrouter.ai/api/v1`, `moonshotai/kimi-k2:free` |
+| Text drafting | `LLM_API_KEY` (required), `LLM_API_BASE_URL`, `LLM_MODEL` | OpenRouter free tier — `https://openrouter.ai/api/v1`, `nvidia/nemotron-3-super-120b-a12b:free` |
 | Photo → visual description | `LLM_VISION_API_KEY` (optional), `LLM_VISION_API_BASE_URL`, `LLM_VISION_MODEL` | NVIDIA NIM — `https://integrate.api.nvidia.com/v1`, `meta/llama-3.2-90b-vision-instruct` |
 
-**Use OpenRouter, not Moonshot's own `platform.kimi.ai` API, for the free tier.** Moonshot's own API requires
-a funded account balance before it will serve *any* request — even to the nominally-free K2 model — and
-returns a 429 `exceeded_current_quota_error` / "account suspended" once the balance is exhausted (hit this in
-production on 2026-07-22). OpenRouter hosts the identical `moonshotai/kimi-k2:free` model with no balance
-requirement, just rate limits. The text call sends OpenRouter's `HTTP-Referer`/`X-Title` attribution headers
-unconditionally (harmless no-ops on other providers) — free OpenRouter models can be deprioritised without them.
+**Provider swap history — read before changing `LLM_MODEL` again:**
+1. Started on Anthropic Claude (paid) — swapped out, no free tier.
+2. Tried Moonshot's own `platform.kimi.ai` API for Kimi K2 — **do not use this.** It requires a funded
+   account balance before serving *any* request, even to the nominally-free K2 model, and returns a 429
+   `exceeded_current_quota_error` / "account suspended" once exhausted (hit this in production, 2026-07-22).
+3. Tried OpenRouter's `moonshotai/kimi-k2:free` — also retired mid-project: OpenRouter now 404s with
+   `"This model is unavailable for free. ... use this slug instead: moonshotai/kimi-k2"` (paid).
+4. **Current default: OpenRouter's `nvidia/nemotron-3-super-120b-a12b:free`** — $0/M input and output,
+   262K context, text-only (no vision — that's still the separate `LLM_VISION_API_KEY` step below).
+   Verify it's still listed at openrouter.ai/models?max_price=0 before assuming it's still free; OpenRouter's
+   free-tier lineup has already changed once during this project.
+
+The text call sends OpenRouter's `HTTP-Referer`/`X-Title` attribution headers unconditionally (harmless
+no-ops on other providers) — free OpenRouter models can be deprioritised without them.
 
 Swap providers any time by changing the env vars — no code change needed, as long as the new provider exposes
 an OpenAI-compatible `POST {base_url}/chat/completions` endpoint. This was deliberately kept generic (not
-named after Claude/Kimi/NVIDIA specifically) because free-tier model availability shifts — started on Kimi K2
-since it's currently free, expect to swap it later.
+named after Claude/Kimi/NVIDIA specifically) precisely because free-tier availability keeps shifting — see
+the swap history above.
 
 - **Vision is fully decoupled from text drafting.** If `LLM_VISION_API_KEY` isn't set, the photo is silently
   skipped and generation proceeds text-only from botanical + common name — never a hard failure. If it *is*
@@ -289,11 +297,12 @@ since it's currently free, expect to swap it later.
   JSON shape, picks only known `AI_GENERATE_FIELDS` keys and coerces everything else to `null`, same rule as
   `sanitiseSubImages()`. Tested in `src/__tests__/aiGenerate.test.ts`.
 - **Verify `LLM_MODEL`/`LLM_VISION_MODEL` before relying on this in production** — these are best-guess
-  defaults for OpenRouter's free Kimi K2 and an NVIDIA NIM vision model; provider model IDs and free-tier
-  availability change. If the text call 502s with a 404/model-not-found body, the model string is wrong —
-  check the provider's current docs and override via `LLM_MODEL` rather than editing the route. If it 502s
+  defaults for an OpenRouter free model and an NVIDIA NIM vision model; provider model IDs and free-tier
+  availability change (see the provider swap history above — this has already happened twice). If the text
+  call 502s with a 404/model-not-found body, the model string is wrong or its free slug was retired — check
+  openrouter.ai/models?max_price=0 and override via `LLM_MODEL` rather than editing the route. If it 502s
   with a 429 `exceeded_current_quota_error` / "account suspended", that means `LLM_API_KEY` is a
-  `platform.kimi.ai` key rather than an OpenRouter key — see the billing note above.
+  `platform.kimi.ai`-style key rather than an OpenRouter key.
 
 ### Plant.id / Google Vision identification
 
@@ -439,7 +448,7 @@ When adding a second property later: the Landmarks column in `/plants` and the m
 | `GOOGLE_VISION_API_KEY` | Yes | Fallback vision API |
 | `LLM_API_KEY` | Yes | "Generate with AI" text drafting — OpenRouter API key (openrouter.ai/keys), NOT a Moonshot platform.kimi.ai key |
 | `LLM_API_BASE_URL` | No | Override text provider base URL — default `https://openrouter.ai/api/v1` |
-| `LLM_MODEL` | No | Override text model ID — default `moonshotai/kimi-k2:free` |
+| `LLM_MODEL` | No | Override text model ID — default `nvidia/nemotron-3-super-120b-a12b:free` |
 | `LLM_VISION_API_KEY` | No | "Generate with AI" photo description — omit to skip vision and go text-only |
 | `LLM_VISION_API_BASE_URL` | No | Override vision provider base URL — default `https://integrate.api.nvidia.com/v1` |
 | `LLM_VISION_MODEL` | No | Override vision model ID — default `meta/llama-3.2-90b-vision-instruct` |

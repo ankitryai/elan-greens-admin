@@ -8,12 +8,15 @@
 // the DB, it only returns a draft for the form to pre-fill.
 //
 // Two separate OpenAI-compatible chat-completions providers, both swappable
-// via env vars with no code change (provider-agnostic on purpose — started
-// on a free Kimi K2 text tier, may move providers as free-tier limits shift):
+// via env vars with no code change (provider-agnostic on purpose — free-tier
+// model availability shifts, expect to swap this again):
 //   1. Text drafting  — LLM_API_KEY        (default: OpenRouter's free
-//      "moonshotai/kimi-k2:free" — NOT Moonshot's own platform.kimi.ai API,
-//      which requires a funded account balance even to use K2. OpenRouter
-//      hosts the same model with no balance requirement, just rate limits.)
+//      "nvidia/nemotron-3-super-120b-a12b:free". NOT Moonshot's own
+//      platform.kimi.ai API — that requires a funded account balance even
+//      for K2. Kimi K2 was tried on OpenRouter too, but its free slug was
+//      retired mid-project (404 "unavailable for free, use paid slug
+//      instead") — see CLAUDE.md for the swap history if this needs
+//      revisiting.)
 //   2. Photo → visual description — LLM_VISION_API_KEY (default: NVIDIA NIM)
 // The vision step is optional and independent: it turns a photo into a plain
 // text visual description, which then becomes one more input to the text
@@ -41,7 +44,7 @@ import { sanitiseAiGenerateResult, buildFewShotExamples } from '@/lib/aiGenerate
 export const maxDuration = 60
 
 const LLM_API_BASE_URL        = process.env.LLM_API_BASE_URL        ?? 'https://openrouter.ai/api/v1'
-const LLM_MODEL                = process.env.LLM_MODEL               ?? 'moonshotai/kimi-k2:free'
+const LLM_MODEL                = process.env.LLM_MODEL               ?? 'nvidia/nemotron-3-super-120b-a12b:free'
 const LLM_VISION_API_BASE_URL = process.env.LLM_VISION_API_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
 const LLM_VISION_MODEL         = process.env.LLM_VISION_MODEL         ?? 'meta/llama-3.2-90b-vision-instruct'
 
