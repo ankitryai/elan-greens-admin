@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
   const imageInput = body.imageBase64 || body.imageUrl || null
   const visualDescription = imageInput ? await describeImage(imageInput) : null
 
-  const systemPrompt = `You are drafting plant directory entries for a residential society's plant catalogue.
+  const systemPrompt = `You are drafting plant directory entries for a residential society's plant catalogue in India.
 Given a botanical name, common name, and optionally a visual description of a photo, fill in the remaining fields below.
 
 The botanical name is the grounding key — base every fact on that exact species, not on the common name alone
@@ -142,17 +142,37 @@ The botanical name is the grounding key — base every fact on that exact specie
 attempt but mark it with low confidence rather than leaving it blank, EXCEPT where you have no reasonable basis
 at all (e.g. no Tamil name is well known) — then return null for that field.
 
+**Indian context**: this catalogue serves residents in India. Where genuinely accurate for this exact species,
+prefer India-relevant framing — traditional/Ayurvedic uses if documented for medicinal_properties, whether it
+is commonly cultivated in Indian gardens/climate for interesting_fact and habitat_type, Indian regional names.
+Never fabricate an India connection for a species that has none (e.g. don't invent Ayurvedic uses for a plant
+with no such tradition) — global/generic facts are fine when that's genuinely all that applies.
+
 Match the tone and field format of these already-verified entries from the same catalogue (format only —
 do not copy their facts, they are a different species):
 ${fewShotBlock}
 
-Fields to generate: ${AI_GENERATE_FIELDS.join(', ')}.
-- category: one of Tree, Palm, Shrub, Herb, Creeper, Climber, Hedge, Grass
-- height_category: one of Short, Medium, Tall
-- flowering_type: one of Flowering, Non-Flowering
-- description: 2-3 sentences, directional not encyclopaedic
-- medicinal_properties: pipe-separated short claims, e.g. "Treats fever|Reduces inflammation" (be conservative — this is the field most prone to overclaiming)
-- Local names (hindi_name, kannada_name, tamil_name): regional variants exist and you can hallucinate here — mark confidence low unless well known
+Fields to generate, with character limits (STAY WELL UNDER these — going over gets silently truncated) and format:
+- category (max 20 chars): exactly one of Tree, Palm, Shrub, Herb, Creeper, Climber, Hedge, Grass
+- height_category (max 10 chars): exactly one of Short, Medium, Tall
+- flowering_type (max 15 chars): exactly one of Flowering, Non-Flowering
+- flowering_season (max 50 chars): short, e.g. "Year-round" or "March-May"
+- description (max 500 chars): 2-3 sentences, directional not encyclopaedic
+- medicinal_properties (max 300 chars): pipe-separated short claims, e.g. "Treats fever|Reduces inflammation" (be conservative — this is the field most prone to overclaiming)
+- plant_family (max 100 chars), genus (max 100 chars)
+- toxicity (max 50 chars): short, e.g. "Non-toxic" or "Toxic if ingested"
+- edible_parts (max 200 chars): comma-separated, e.g. "Leaves, fruit" — or null if none
+- native_region (max 150 chars): concise, e.g. "South Asia" not a paragraph
+- sunlight_needs (max 30 chars): short, e.g. "Full Sun" or "Partial Shade"
+- watering_needs (max 20 chars): one or two words, e.g. "Low" or "Moderate" — NOT a sentence
+- interesting_fact (max 300 chars): one punchy fact for residents, India-relevant if genuinely applicable
+- life_span_description (max 100 chars): short, e.g. "150-200 years" or "Perennial, 5-10 years"
+- Local names (hindi_name, kannada_name, tamil_name, max 100 chars each): regional variants exist and you can hallucinate here — mark confidence low unless well known
+- foliage_type (max 50 chars): exactly one of Evergreen, Deciduous, Semi-evergreen
+- conservation_status (max 100 chars): IUCN-style category, e.g. "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered", "Data Deficient", "Not Evaluated"
+- growth_rate (max 20 chars): exactly one of Slow, Moderate, Fast
+- propagation_methods (max 200 chars): pipe-separated from methods like Seeds, Stem cuttings, Division, Air layering, Grafting, Suckers, Offsets, Bulbs, Spores
+- habitat_type (max 200 chars): a classic, specific habitat description a gardener would recognise, e.g. "Tropical rainforest understory" or "Tropical dry deciduous forest, scrubland" — never a single vague repeated word like "terrestrial, Terrestrial"
 
 Respond with ONLY a single JSON object, no prose, no markdown fences, no reasoning or thinking output of any
 kind before or after it — your entire response must start with { and end with }, in this exact shape:

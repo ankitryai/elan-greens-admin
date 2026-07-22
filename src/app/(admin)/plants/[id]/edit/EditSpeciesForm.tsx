@@ -1039,6 +1039,7 @@ export default function EditSpeciesForm({
           <div className="grid grid-cols-2 gap-3">
             <Field label="Foliage Type">
               <Select
+                value={watch('foliage_type') || undefined}
                 defaultValue={species.foliage_type ?? ''}
                 onValueChange={v => setValue('foliage_type', v as PlantSpeciesFormData['foliage_type'])}
               >
@@ -1056,6 +1057,7 @@ export default function EditSpeciesForm({
             </Field>
             <Field label="Growth Rate">
               <Select
+                value={watch('growth_rate') || undefined}
                 defaultValue={species.growth_rate ?? ''}
                 onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}
               >

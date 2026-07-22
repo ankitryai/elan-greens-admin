@@ -243,7 +243,10 @@ export default function AddSpeciesPage() {
           </h2>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Foliage Type">
-              <Select onValueChange={v => setValue('foliage_type', v as PlantSpeciesFormData['foliage_type'])}>
+              <Select
+                value={watch('foliage_type') || undefined}
+                onValueChange={v => setValue('foliage_type', v as PlantSpeciesFormData['foliage_type'])}
+              >
                 <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Evergreen">Evergreen</SelectItem>
@@ -256,7 +259,10 @@ export default function AddSpeciesPage() {
               <CharCountInput name="conservation_status" register={register} watch={watch} max={100} placeholder="e.g. Least Concern" />
             </Field>
             <Field label="Growth Rate">
-              <Select onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}>
+              <Select
+                value={watch('growth_rate') || undefined}
+                onValueChange={v => setValue('growth_rate', v as PlantSpeciesFormData['growth_rate'])}
+              >
                 <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Slow">Slow</SelectItem>

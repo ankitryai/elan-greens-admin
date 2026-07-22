@@ -207,17 +207,21 @@ export interface FetchDebug {
 
 // ── AI-generated plant field draft (POST /api/generate-with-ai) ───────────────
 // Fields an LLM can plausibly infer from botanical name + common name + a
-// photo. Deliberately excludes foliage_type/conservation_status/growth_rate/
-// propagation_methods/habitat_type — those are already covered by the free
-// GBIF/POWO/iNaturalist/IUCN enrichment pipeline (see EnrichmentResult) and
-// asking the LLM to guess them too would just create a second, less reliable
-// source for the same fields.
+// photo. Originally excluded foliage_type/conservation_status/growth_rate/
+// propagation_methods/habitat_type in favour of the free GBIF/POWO/
+// iNaturalist/IUCN enrichment pipeline (see EnrichmentResult) — but in
+// practice that pipeline reliably returns only observations_count for most
+// species (the rest miss silently, or GBIF's habitat_type comes back
+// case-duplicated e.g. "terrestrial, Terrestrial"). Moved to the LLM instead;
+// the free enrichment button still exists as a secondary/free option the
+// admin can also try.
 export const AI_GENERATE_FIELDS = [
   'hindi_name', 'kannada_name', 'tamil_name',
   'category', 'height_category', 'flowering_type', 'flowering_season',
   'description', 'medicinal_properties', 'plant_family', 'genus', 'toxicity',
   'edible_parts', 'native_region', 'sunlight_needs', 'watering_needs',
   'interesting_fact', 'life_span_description',
+  'foliage_type', 'conservation_status', 'growth_rate', 'propagation_methods', 'habitat_type',
 ] as const
 
 export type AiGenerateField = typeof AI_GENERATE_FIELDS[number]

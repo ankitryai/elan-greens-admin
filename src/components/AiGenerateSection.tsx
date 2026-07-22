@@ -20,6 +20,9 @@ const FIELD_LABELS: Record<string, string> = {
   genus: 'Genus', toxicity: 'Toxicity', edible_parts: 'Edible Parts',
   native_region: 'Native Region', sunlight_needs: 'Sunlight', watering_needs: 'Watering',
   interesting_fact: 'Interesting Fact', life_span_description: 'Lifespan',
+  foliage_type: 'Foliage Type', conservation_status: 'Conservation Status',
+  growth_rate: 'Growth Rate', propagation_methods: 'Propagation Methods',
+  habitat_type: 'Habitat Type',
 }
 
 const CONFIDENCE_STYLE: Record<string, string> = {

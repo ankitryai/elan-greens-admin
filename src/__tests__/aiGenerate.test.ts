@@ -69,6 +69,36 @@ describe('sanitiseAiGenerateResult', () => {
     const expected = [...AI_GENERATE_FIELDS, '_confidence'].sort()
     expect(keys).toEqual(expected)
   })
+
+  it('normalises enum fields to canonical casing (case-insensitive match)', () => {
+    const result = sanitiseAiGenerateResult({ category: 'herb', height_category: 'MEDIUM', foliage_type: 'evergreen' })
+    expect(result.category).toBe('Herb')
+    expect(result.height_category).toBe('Medium')
+    expect(result.foliage_type).toBe('Evergreen')
+  })
+
+  it('drops an enum value that is not in the allowed option list', () => {
+    const result = sanitiseAiGenerateResult({ category: 'Bush', growth_rate: 'Very Fast Indeed' })
+    expect(result.category).toBeNull()
+    expect(result.growth_rate).toBeNull()
+  })
+
+  it('leaves non-enum free-text fields untouched by enum validation', () => {
+    const result = sanitiseAiGenerateResult({ description: 'Anything goes here.' })
+    expect(result.description).toBe('Anything goes here.')
+  })
+
+  it('hard-truncates a field longer than its DB/schema character limit', () => {
+    const longWatering = 'This is a much longer sentence than the 20-character watering_needs limit allows'
+    const result = sanitiseAiGenerateResult({ watering_needs: longWatering })
+    expect(result.watering_needs).toHaveLength(20)
+    expect(result.watering_needs).toBe(longWatering.slice(0, 20))
+  })
+
+  it('does not truncate a field that is already within its limit', () => {
+    const result = sanitiseAiGenerateResult({ watering_needs: 'Low' })
+    expect(result.watering_needs).toBe('Low')
+  })
 })
 
 // ── hasAnyGeneratedField ─────────────────────────────────────────────────────

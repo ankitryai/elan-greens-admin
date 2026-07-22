@@ -273,12 +273,26 @@ the swap history above.
   grounding key that disambiguates species sharing a common name.
 - Generates: `hindi_name, kannada_name, tamil_name, category, height_category, flowering_type,
   flowering_season, description, medicinal_properties, plant_family, genus, toxicity, edible_parts,
-  native_region, sunlight_needs, watering_needs, interesting_fact, life_span_description` — the full list is
-  `AI_GENERATE_FIELDS` in `src/types/index.ts`, single source of truth shared by the route, the sanitiser, and
-  the apply logic.
-- **Deliberately does NOT generate** `foliage_type, conservation_status, growth_rate, propagation_methods,
-  habitat_type` — those are already covered by the free GBIF/POWO/iNaturalist/IUCN enrichment pipeline
-  (see above), which is more reliable for that specific data than an LLM guess would be.
+  native_region, sunlight_needs, watering_needs, interesting_fact, life_span_description, foliage_type,
+  conservation_status, growth_rate, propagation_methods, habitat_type` — the full list is `AI_GENERATE_FIELDS`
+  in `src/types/index.ts`, single source of truth shared by the route, the sanitiser, and the apply logic.
+- **`foliage_type`/`conservation_status`/`growth_rate`/`propagation_methods`/`habitat_type` were originally
+  left to the free GBIF/POWO/iNaturalist/IUCN enrichment pipeline instead** (see below) — moved to the LLM
+  after production use showed that pipeline reliably returns only `observations_count` for most species (the
+  rest miss silently), and GBIF's `habitat_type` can come back case-duplicated (e.g. "terrestrial, Terrestrial").
+  The free enrichment button still exists as a zero-cost secondary option the admin can also try.
+- **Indian context**: the system prompt explicitly frames this as a catalogue for a residential society in
+  India — prefers Ayurvedic/traditional Indian medicinal uses, Indian cultivation context for
+  `interesting_fact`/`habitat_type`, etc., **only where genuinely accurate for that exact species**; the
+  prompt explicitly forbids fabricating an India connection for species that have none.
+- **Per-field character limits are enforced twice**: the system prompt lists an explicit max length and format
+  per field (mirroring `plantSpeciesSchema` in `lib/validations.ts`), AND `sanitiseAiGenerateResult()` hard-
+  truncates to `MAX_LENGTHS` as a safety net — LLMs don't reliably self-limit length, this is the same
+  reasoning as the `maxLength` attribute already enforced on every bounded form input.
+- **Enum fields are validated, not trusted**: `category`, `height_category`, `flowering_type`, `foliage_type`,
+  `growth_rate` are matched case-insensitively against the fixed option list and normalised to canonical
+  casing (`ENUM_FIELDS` in `aiGenerate.ts`) — a value outside the set becomes `null` rather than silently
+  producing a Select that looks unselected despite `common_name`/`register()` fields around it being filled.
 - **Few-shot examples for format only, never facts**: pulls up to 4 already-`VERIFIED` (non-tentative) plants
   via `getAllSpecies()` to show the model the expected tone/field format. The prompt explicitly tells it not to
   borrow facts from these examples — a new species' description must come from the model's own knowledge of
@@ -296,6 +310,12 @@ the swap history above.
 - Sanitisation lives in `src/lib/aiGenerate.ts` (`sanitiseAiGenerateResult`) — never trusts the model's raw
   JSON shape, picks only known `AI_GENERATE_FIELDS` keys and coerces everything else to `null`, same rule as
   `sanitiseSubImages()`. Tested in `src/__tests__/aiGenerate.test.ts`.
+- **Radix `Select` components must be controlled (`value={watch(field)}`), not just `defaultValue`** — for
+  Category/Height/Flowering Type (`PlantIdentitySection.tsx`) and Foliage Type/Growth Rate (both forms'
+  Enrichment section). `defaultValue` alone only seeds the initial render; calling `setValue()` from code
+  (Populate-from-Name, Plant.id apply, or this feature) updates the form data but the Select visually stays on
+  its old/placeholder value unless it's also bound to `value=`. Hit this in production: the AI diff table
+  showed "Category: Herb" applied, but the Select kept showing "Select…".
 - **Verify `LLM_MODEL`/`LLM_VISION_MODEL` before relying on this in production** — these are best-guess
   defaults for an OpenRouter free model and an NVIDIA NIM vision model; provider model IDs and free-tier
   availability change (see the provider swap history above — this has already happened twice). If the text

@@ -98,6 +98,7 @@ export function PlantIdentitySection({
       <div className="grid grid-cols-2 gap-3">
         <Field label="Category *" error={errors.category?.message}>
           <Select
+            value={watch('category') || undefined}
             defaultValue={defaultCategory}
             onValueChange={v => setValue('category', v as PlantSpeciesFormData['category'])}
           >
@@ -109,6 +110,7 @@ export function PlantIdentitySection({
         </Field>
         <Field label="Height" error={errors.height_category?.message}>
           <Select
+            value={watch('height_category') || undefined}
             defaultValue={defaultHeight}
             onValueChange={v => setValue('height_category', v as PlantSpeciesFormData['height_category'])}
           >
@@ -123,6 +125,7 @@ export function PlantIdentitySection({
       <div className="grid grid-cols-2 gap-3">
         <Field label="Flowering Type">
           <Select
+            value={watch('flowering_type') || undefined}
             defaultValue={defaultFlowering}
             onValueChange={v => setValue('flowering_type', v as PlantSpeciesFormData['flowering_type'])}
           >
