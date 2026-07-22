@@ -30,6 +30,13 @@ import { timedFetch } from '@/lib/apiLogger'
 import { AI_GENERATE_FIELDS } from '@/types'
 import { sanitiseAiGenerateResult, buildFewShotExamples } from '@/lib/aiGenerate'
 
+// Ask Vercel for the longest function duration the plan allows — free-tier
+// LLM providers can be slow, and a plain 10s Hobby default was cutting these
+// calls off mid-flight with no error surfaced to the browser (indefinite
+// "Generating…" spinner). Vercel silently caps this to whatever the plan
+// actually allows if 60 is too high, so it's safe to always request it.
+export const maxDuration = 60
+
 const LLM_API_BASE_URL        = process.env.LLM_API_BASE_URL        ?? 'https://api.moonshot.ai/v1'
 const LLM_MODEL                = process.env.LLM_MODEL               ?? 'kimi-k2-0711-preview'
 const LLM_VISION_API_BASE_URL = process.env.LLM_VISION_API_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
@@ -39,7 +46,14 @@ function hostnameOf(url: string): string {
   try { return new URL(url).hostname } catch { return url }
 }
 
-/** Turns a photo into a plain-text visual description via an OpenAI-compatible vision model. Returns null on any failure — vision is a nice-to-have, never blocks text generation. */
+/** fetch() with a hard timeout — an unresponsive free-tier provider must never hang the request indefinitely. */
+function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
+/** Turns a photo into a plain-text visual description via an OpenAI-compatible vision model. Returns null on any failure (including timeout) — vision is a nice-to-have, never blocks text generation. */
 async function describeImage(imageUrlOrDataUri: string): Promise<string | null> {
   const apiKey = process.env.LLM_VISION_API_KEY
   if (!apiKey) return null
@@ -48,7 +62,7 @@ async function describeImage(imageUrlOrDataUri: string): Promise<string | null> 
     const response = await timedFetch(
       'llm_vision',
       hostnameOf(LLM_VISION_API_BASE_URL),
-      () => fetch(`${LLM_VISION_API_BASE_URL}/chat/completions`, {
+      () => fetchWithTimeout(`${LLM_VISION_API_BASE_URL}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -65,7 +79,7 @@ async function describeImage(imageUrlOrDataUri: string): Promise<string | null> 
             ],
           }],
         }),
-      })
+      }, 15_000)
     )
     if (!response.ok) return null
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
@@ -143,26 +157,35 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
     visualDescription ? `Photo description: ${visualDescription}` : null,
   ].filter(Boolean).join('\n')
 
-  const response = await timedFetch(
-    'llm_text',
-    hostnameOf(LLM_API_BASE_URL),
-    () => fetch(`${LLM_API_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        max_tokens: 1500,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userText },
-        ],
-      }),
-    }),
-    { botanical_name: botanicalName }
-  )
+  let response: Response
+  try {
+    response = await timedFetch(
+      'llm_text',
+      hostnameOf(LLM_API_BASE_URL),
+      () => fetchWithTimeout(`${LLM_API_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          max_tokens: 1500,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userText },
+          ],
+        }),
+      }, 40_000),
+      { botanical_name: botanicalName }
+    )
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'AbortError'
+    return NextResponse.json(
+      { error: timedOut ? 'LLM API timed out after 40s — the provider may be overloaded, try again.' : `LLM API request failed: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 502 }
+    )
+  }
 
   if (!response.ok) {
     const text = await response.text()

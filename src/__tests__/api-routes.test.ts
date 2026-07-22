@@ -243,6 +243,24 @@ describe('/api/generate-with-ai', () => {
     expect(json.error).toMatch(/503/)
   })
 
+  it('returns 502 with a clear timeout message when the text call is aborted', async () => {
+    const abortError = new Error('The operation was aborted')
+    abortError.name = 'AbortError'
+    vi.mocked(fetch).mockRejectedValueOnce(abortError)
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(502)
+    const json = await res.json()
+    expect(json.error).toMatch(/timed out/i)
+  })
+
+  it('returns 502 with the underlying message on a non-timeout network failure', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND'))
+    const res = await callRoute({ commonName: 'Neem Tree', botanicalName: 'Azadirachta indica' })
+    expect(res.status).toBe(502)
+    const json = await res.json()
+    expect(json.error).toMatch(/ENOTFOUND/)
+  })
+
   it('returns 502 when the LLM response is not valid JSON', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       mockResponse({ choices: [{ message: { content: 'Sorry, I cannot help with that.' } }] })

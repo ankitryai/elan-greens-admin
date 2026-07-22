@@ -42,7 +42,7 @@ export function useGenerateWithAI({
     }
 
     setGenerating(true)
-    setGenerateStatus('Asking Claude to draft the remaining fields…')
+    setGenerateStatus('Asking the AI to draft the remaining fields — this can take up to 40s…')
     setLastResult(null)
 
     try {
@@ -63,7 +63,7 @@ export function useGenerateWithAI({
       }
       const result = sanitiseAiGenerateResult(await res.json())
       if (!hasAnyGeneratedField(result)) {
-        setGenerateStatus('Claude returned no usable fields — fill in manually.')
+        setGenerateStatus('The AI returned no usable fields — fill in manually.')
         return
       }
       setLastResult(result)

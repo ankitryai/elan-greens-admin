@@ -1,7 +1,7 @@
 'use client'
 // =============================================================================
 // Shared "Generate with AI" section — draft the remaining plant fields from
-// botanical name + common name (+ optional photo) via Claude, then review a
+// botanical name + common name (+ optional photo) via an LLM, then review a
 // diff table before applying. Rendered on both the Add page and Edit form.
 // =============================================================================
 
@@ -98,7 +98,7 @@ export function AiGenerateSection({
                 <tr>
                   <th className="text-left px-3 py-2 text-gray-500 font-medium w-32">Field</th>
                   <th className="text-left px-3 py-2 text-gray-500 font-medium">Current</th>
-                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Claude suggests</th>
+                  <th className="text-left px-3 py-2 text-gray-500 font-medium">AI suggests</th>
                   <th className="text-left px-3 py-2 text-gray-500 font-medium w-20">Confidence</th>
                 </tr>
               </thead>
