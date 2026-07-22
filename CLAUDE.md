@@ -241,8 +241,15 @@ the **Edit** form, next to the Populate-from-Name section.
 
 | Purpose | Env vars | Default provider/model |
 |---|---|---|
-| Text drafting | `LLM_API_KEY` (required), `LLM_API_BASE_URL`, `LLM_MODEL` | Moonshot Kimi K2 — `https://api.moonshot.ai/v1`, `kimi-k2-0711-preview` |
+| Text drafting | `LLM_API_KEY` (required), `LLM_API_BASE_URL`, `LLM_MODEL` | OpenRouter's free Kimi K2 — `https://openrouter.ai/api/v1`, `moonshotai/kimi-k2:free` |
 | Photo → visual description | `LLM_VISION_API_KEY` (optional), `LLM_VISION_API_BASE_URL`, `LLM_VISION_MODEL` | NVIDIA NIM — `https://integrate.api.nvidia.com/v1`, `meta/llama-3.2-90b-vision-instruct` |
+
+**Use OpenRouter, not Moonshot's own `platform.kimi.ai` API, for the free tier.** Moonshot's own API requires
+a funded account balance before it will serve *any* request — even to the nominally-free K2 model — and
+returns a 429 `exceeded_current_quota_error` / "account suspended" once the balance is exhausted (hit this in
+production on 2026-07-22). OpenRouter hosts the identical `moonshotai/kimi-k2:free` model with no balance
+requirement, just rate limits. The text call sends OpenRouter's `HTTP-Referer`/`X-Title` attribution headers
+unconditionally (harmless no-ops on other providers) — free OpenRouter models can be deprioritised without them.
 
 Swap providers any time by changing the env vars — no code change needed, as long as the new provider exposes
 an OpenAI-compatible `POST {base_url}/chat/completions` endpoint. This was deliberately kept generic (not
@@ -282,9 +289,11 @@ since it's currently free, expect to swap it later.
   JSON shape, picks only known `AI_GENERATE_FIELDS` keys and coerces everything else to `null`, same rule as
   `sanitiseSubImages()`. Tested in `src/__tests__/aiGenerate.test.ts`.
 - **Verify `LLM_MODEL`/`LLM_VISION_MODEL` before relying on this in production** — these are best-guess
-  defaults for Moonshot Kimi K2 and an NVIDIA NIM vision model; provider model IDs and free-tier availability
-  change. If the text call 502s with a 404/model-not-found body, the model string is wrong — check the
-  provider's current docs and override via `LLM_MODEL` rather than editing the route.
+  defaults for OpenRouter's free Kimi K2 and an NVIDIA NIM vision model; provider model IDs and free-tier
+  availability change. If the text call 502s with a 404/model-not-found body, the model string is wrong —
+  check the provider's current docs and override via `LLM_MODEL` rather than editing the route. If it 502s
+  with a 429 `exceeded_current_quota_error` / "account suspended", that means `LLM_API_KEY` is a
+  `platform.kimi.ai` key rather than an OpenRouter key — see the billing note above.
 
 ### Plant.id / Google Vision identification
 
@@ -428,9 +437,9 @@ When adding a second property later: the Landmarks column in `/plants` and the m
 | `SUPERADMIN_EMAIL` | Yes | Only this email can log in |
 | `PLANT_ID_API_KEY` | Yes | Plant.id identification API |
 | `GOOGLE_VISION_API_KEY` | Yes | Fallback vision API |
-| `LLM_API_KEY` | Yes | "Generate with AI" text drafting — OpenAI-compatible key, default provider Moonshot Kimi K2 |
-| `LLM_API_BASE_URL` | No | Override text provider base URL — default `https://api.moonshot.ai/v1` |
-| `LLM_MODEL` | No | Override text model ID — default `kimi-k2-0711-preview` |
+| `LLM_API_KEY` | Yes | "Generate with AI" text drafting — OpenRouter API key (openrouter.ai/keys), NOT a Moonshot platform.kimi.ai key |
+| `LLM_API_BASE_URL` | No | Override text provider base URL — default `https://openrouter.ai/api/v1` |
+| `LLM_MODEL` | No | Override text model ID — default `moonshotai/kimi-k2:free` |
 | `LLM_VISION_API_KEY` | No | "Generate with AI" photo description — omit to skip vision and go text-only |
 | `LLM_VISION_API_BASE_URL` | No | Override vision provider base URL — default `https://integrate.api.nvidia.com/v1` |
 | `LLM_VISION_MODEL` | No | Override vision model ID — default `meta/llama-3.2-90b-vision-instruct` |

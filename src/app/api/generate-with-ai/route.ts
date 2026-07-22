@@ -10,7 +10,10 @@
 // Two separate OpenAI-compatible chat-completions providers, both swappable
 // via env vars with no code change (provider-agnostic on purpose — started
 // on a free Kimi K2 text tier, may move providers as free-tier limits shift):
-//   1. Text drafting  — LLM_API_KEY        (default: Moonshot Kimi K2)
+//   1. Text drafting  — LLM_API_KEY        (default: OpenRouter's free
+//      "moonshotai/kimi-k2:free" — NOT Moonshot's own platform.kimi.ai API,
+//      which requires a funded account balance even to use K2. OpenRouter
+//      hosts the same model with no balance requirement, just rate limits.)
 //   2. Photo → visual description — LLM_VISION_API_KEY (default: NVIDIA NIM)
 // The vision step is optional and independent: it turns a photo into a plain
 // text visual description, which then becomes one more input to the text
@@ -37,8 +40,8 @@ import { sanitiseAiGenerateResult, buildFewShotExamples } from '@/lib/aiGenerate
 // actually allows if 60 is too high, so it's safe to always request it.
 export const maxDuration = 60
 
-const LLM_API_BASE_URL        = process.env.LLM_API_BASE_URL        ?? 'https://api.moonshot.ai/v1'
-const LLM_MODEL                = process.env.LLM_MODEL               ?? 'kimi-k2-0711-preview'
+const LLM_API_BASE_URL        = process.env.LLM_API_BASE_URL        ?? 'https://openrouter.ai/api/v1'
+const LLM_MODEL                = process.env.LLM_MODEL               ?? 'moonshotai/kimi-k2:free'
 const LLM_VISION_API_BASE_URL = process.env.LLM_VISION_API_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
 const LLM_VISION_MODEL         = process.env.LLM_VISION_MODEL         ?? 'meta/llama-3.2-90b-vision-instruct'
 
@@ -167,6 +170,12 @@ Respond with ONLY a single JSON object, no prose, no markdown fences, in this ex
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
+          // OpenRouter-specific attribution headers — ignored by other providers.
+          // Free-tier models on OpenRouter can be deprioritised for requests
+          // without these, so send them unconditionally rather than only when
+          // LLM_API_BASE_URL happens to be openrouter.ai.
+          'HTTP-Referer': 'https://elan-greens-admin.vercel.app',
+          'X-Title': 'Elan Greens Admin',
         },
         body: JSON.stringify({
           model: LLM_MODEL,
